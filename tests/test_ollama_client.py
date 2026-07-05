@@ -54,6 +54,56 @@ class OllamaClientTests(unittest.TestCase):
             self.assertTrue(request_body["messages"][1]["images"][0])
             self.assertEqual("object", request_body["format"]["type"])
             self.assertFalse(request_body["stream"])
+            self.assertEqual(16_384, request_body["options"]["num_ctx"])
+
+    def test_markdown_json_code_fence_is_recovered(self):
+        """모델이 JSON을 코드 블록으로 감싸도 내부 객체를 정상적으로 읽습니다."""
+
+        content = """```json
+{"title_candidates":["1","2","3","4","5"],"body":"본문","tags":["1","2","3","4","5","6","7","8","9","10"]}
+```"""
+
+        result = BlogOllamaClient._parse_structured_content(content)
+
+        self.assertEqual("본문", result["body"])
+        self.assertEqual(5, len(result["title_candidates"]))
+
+    def test_invalid_json_is_retried_once(self):
+        """첫 응답이 잘린 JSON이면 같은 요청을 강화된 지침으로 한 번 재시도합니다."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "product.jpg"
+            image_path.write_bytes(b"image")
+            expected = {
+                "title_candidates": [f"제목 {number}" for number in range(1, 6)],
+                "body": "재시도 후 정상 본문",
+                "tags": [f"태그{number}" for number in range(1, 11)],
+            }
+            # 첫 서버 응답은 닫는 괄호가 없는 잘린 JSON을 반환합니다.
+            first_response = MagicMock()
+            first_response.__enter__.return_value.read.return_value = json.dumps(
+                {"message": {"content": '{"title_candidates": ["잘린 응답"'}},
+                ensure_ascii=False,
+            ).encode("utf-8")
+            # 두 번째 서버 응답은 완전한 구조화 JSON을 반환합니다.
+            second_response = MagicMock()
+            second_response.__enter__.return_value.read.return_value = json.dumps(
+                {"message": {"content": json.dumps(expected, ensure_ascii=False)}},
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+            with patch(
+                "ollama_client.urlopen",
+                side_effect=[first_response, second_response],
+            ) as mocked_urlopen:
+                client = BlogOllamaClient("http://localhost:11434", "gemma3:4b")
+                result = client.generate_post("규칙", "상품 후기", [image_path])
+
+            self.assertEqual(expected, result)
+            self.assertEqual(2, mocked_urlopen.call_count)
+            second_request = mocked_urlopen.call_args_list[1].args[0]
+            second_body = json.loads(second_request.data.decode("utf-8"))
+            self.assertIn("이전 응답은 JSON 형식", second_body["messages"][1]["content"])
 
 
 # 이 테스트 파일을 직접 실행해도 unittest가 시작되게 합니다.
