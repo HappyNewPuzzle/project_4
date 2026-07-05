@@ -56,6 +56,22 @@ class NaverAutomationTests(unittest.TestCase):
             self.assertEqual("image", blocks[1].kind)
             self.assertEqual(image_path, blocks[1].image_path)
 
+    def test_duplicate_marker_inserts_image_only_once(self):
+        """작은 모델이 같은 표시를 반복해도 사진은 최초 위치에 한 번만 넣습니다."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "photo.jpg"
+            image_path.write_bytes(b"photo")
+
+            blocks = build_editor_blocks(
+                "도입\n[PHOTO_1] 첫 설명\n[PHOTO_1]\n추가 설명",
+                [image_path],
+            )
+
+            image_blocks = [block for block in blocks if block.kind == "image"]
+            self.assertEqual(1, len(image_blocks))
+            self.assertEqual(image_path, image_blocks[0].image_path)
+
     def test_missing_photo_marker_stops_before_browser(self):
         """사진 표시가 빠진 본문은 잘못 배치하지 않고 오류로 중단합니다."""
 

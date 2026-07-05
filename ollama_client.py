@@ -69,8 +69,8 @@ class BlogOllamaClient:
             "stream": False,
             # OpenAI 모드와 같은 제목·본문·태그 구조를 강제합니다.
             "format": BLOG_POST_SCHEMA,
-            # 형식 안정성과 자연스러운 문체 사이의 균형을 위한 낮은 온도입니다.
-            "options": {"temperature": 0.3},
+            # 작은 로컬 모델의 형식 위반과 근거 없는 창작을 줄이기 위해 0으로 둡니다.
+            "options": {"temperature": 0},
         }
         # 한글을 보존한 JSON 바이트를 만듭니다.
         encoded_body = json.dumps(request_body, ensure_ascii=False).encode("utf-8")

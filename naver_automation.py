@@ -39,8 +39,8 @@ class EditorBlock:
 
 # 모델이 정확한 표기 대신 자주 사용하는 `(사진1)`과 `[사진 1]`도 허용합니다.
 PHOTO_MARKER_ALIASES = re.compile(r"(?:\(사진\s*(\d+)\)|\[사진\s*(\d+)\])")
-# 정규화된 사진 위치 표시는 한 줄짜리 `[PHOTO_숫자]` 형태입니다.
-PHOTO_MARKER = re.compile(r"(?m)^\s*\[PHOTO_(\d+)\]\s*$")
+# 정규화된 사진 표시는 줄 안팎 어디에 있든 `[PHOTO_숫자]` 형태로 찾습니다.
+PHOTO_MARKER = re.compile(r"\[PHOTO_(\d+)\]")
 
 # 스마트에디터 버전 차이를 고려한 제목 입력 영역 후보입니다.
 TITLE_SELECTORS = (
@@ -74,25 +74,40 @@ def build_editor_blocks(body: str, image_paths: list[Path]) -> list[EditorBlock]
     )
     # 본문에 등장하는 모든 표준 사진 표시와 위치를 찾습니다.
     matches = list(PHOTO_MARKER.finditer(normalized))
-    # 사진 표시 번호는 입력 사진 수와 같은 1부터 N까지의 순서여야 합니다.
-    marker_numbers = [int(match.group(1)) for match in matches]
+    # 모델이 같은 사진 표시를 반복해도 실제 사진은 최초 한 번만 배치합니다.
+    unique_marker_numbers: list[int] = []
+    for match in matches:
+        marker_number = int(match.group(1))
+        if marker_number not in unique_marker_numbers:
+            unique_marker_numbers.append(marker_number)
+    # 최초 등장 번호는 입력 사진 수와 같은 1부터 N까지의 순서여야 합니다.
     expected_numbers = list(range(1, len(image_paths) + 1))
-    if marker_numbers != expected_numbers:
+    if unique_marker_numbers != expected_numbers:
         raise NaverAutomationError(
             "본문의 사진 위치 표시가 올바르지 않습니다. "
-            f"필요한 순서: {expected_numbers}, 실제 순서: {marker_numbers}"
+            f"필요한 순서: {expected_numbers}, 실제 고유 순서: {unique_marker_numbers}"
         )
 
     # 표시 앞뒤의 텍스트와 실제 사진을 순서대로 담을 목록입니다.
     blocks: list[EditorBlock] = []
     cursor = 0
-    for match, image_path in zip(matches, image_paths):
+    inserted_numbers: set[int] = set()
+    for match in matches:
         # 현재 사진 표시 앞에 있는 인사말이나 이전 사진 설명을 가져옵니다.
         text_before = normalized[cursor : match.start()].strip()
         if text_before:
             blocks.append(EditorBlock(kind="text", text=text_before))
-        # 표시 자체 대신 해당 번호의 실제 로컬 사진을 배치합니다.
-        blocks.append(EditorBlock(kind="image", image_path=image_path))
+        marker_number = int(match.group(1))
+        # 같은 번호가 반복되면 표시만 제거하고 사진은 다시 넣지 않습니다.
+        if marker_number not in inserted_numbers:
+            # 표시 자체 대신 해당 번호와 연결된 실제 로컬 사진을 배치합니다.
+            blocks.append(
+                EditorBlock(
+                    kind="image",
+                    image_path=image_paths[marker_number - 1],
+                )
+            )
+            inserted_numbers.add(marker_number)
         cursor = match.end()
 
     # 마지막 사진 표시 뒤의 총평, 링크, 마무리 문구도 추가합니다.

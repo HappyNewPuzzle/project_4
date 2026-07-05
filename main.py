@@ -53,31 +53,44 @@ def choose_generation_mode() -> str:
 def ask_yes_no(message: str) -> bool:
     """사용자에게 예/아니요를 입력받아 True 또는 False로 반환합니다."""
 
-    # 대소문자와 한글·영문 입력을 모두 허용합니다.
-    choice = input(f"{message} (y/n): ").strip().lower()
-    # 명확하지 않은 입력으로 브라우저가 열리지 않도록 허용값을 제한합니다.
-    if choice not in {"y", "yes", "예", "네", "n", "no", "아니오", "아니요"}:
-        raise InputError("y 또는 n으로 입력해주세요.")
-    # 긍정 표현이면 True, 부정 표현이면 False를 반환합니다.
-    return choice in {"y", "yes", "예", "네"}
+    # 잘못 입력해도 생성한 글을 버리지 않고 같은 질문을 다시 표시합니다.
+    while True:
+        # 대소문자와 한글·영문 입력을 모두 허용합니다.
+        choice = input(f"{message} (y/n): ").strip().lower()
+        # 한글 키보드 상태에서 영문 y/n 키를 누른 결과도 자동으로 변환합니다.
+        if choice == "ㅛ":
+            choice = "y"
+        elif choice == "ㅜ":
+            choice = "n"
+        # 긍정 표현이면 True를 반환합니다.
+        if choice in {"y", "yes", "예", "네"}:
+            return True
+        # 부정 표현이면 False를 반환합니다.
+        if choice in {"n", "no", "아니오", "아니요"}:
+            return False
+        # 그 외 입력은 프로그램을 종료하지 않고 다시 안내합니다.
+        print("[안내] y 또는 n으로 입력해주세요.")
 
 
 def choose_title(title_candidates: list[str]) -> str:
     """네이버 편집기에 넣을 제목을 다섯 후보 중에서 선택합니다."""
 
-    # 이미 출력된 제목을 선택 화면에서도 다시 보여줍니다.
-    print("\n네이버 블로그에 사용할 제목을 선택해주세요.")
-    for index, title in enumerate(title_candidates, 1):
-        print(f"{index}. {title}")
-    # 문자열 입력을 숫자로 바꾸고 1부터 5 사이인지 검사합니다.
-    try:
-        choice = int(input("제목 번호 (1~5): ").strip())
-    except ValueError as exc:
-        raise InputError("제목 번호는 숫자로 입력해주세요.") from exc
-    if not 1 <= choice <= len(title_candidates):
-        raise InputError(f"1부터 {len(title_candidates)} 사이의 번호를 입력해주세요.")
-    # 목록은 0부터 시작하므로 사용자가 입력한 번호에서 1을 뺍니다.
-    return title_candidates[choice - 1]
+    # 잘못 입력해도 글 생성부터 다시 하지 않도록 선택이 끝날 때까지 반복합니다.
+    while True:
+        # 이미 출력된 제목을 선택 화면에서도 다시 보여줍니다.
+        print("\n네이버 블로그에 사용할 제목을 선택해주세요.")
+        for index, title in enumerate(title_candidates, 1):
+            print(f"{index}. {title}")
+        # 문자열 입력을 숫자로 바꿉니다.
+        try:
+            choice = int(input(f"제목 번호 (1~{len(title_candidates)}): ").strip())
+        except ValueError:
+            print("[안내] 제목 번호는 숫자로 입력해주세요.")
+            continue
+        # 올바른 범위라면 목록 인덱스로 변환해 제목을 반환합니다.
+        if 1 <= choice <= len(title_candidates):
+            return title_candidates[choice - 1]
+        print(f"[안내] 1부터 {len(title_candidates)} 사이의 번호를 입력해주세요.")
 
 
 def choose_review_type() -> str:
