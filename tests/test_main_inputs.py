@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 # 표준 테스트 도구와 사용자 입력 모의 기능을 사용합니다.
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 # 검증할 예/아니요 및 제목 선택 함수를 가져옵니다.
@@ -13,6 +15,7 @@ from main import (
     choose_review_type,
     choose_title,
     read_rating,
+    read_image_paths,
     read_required_text,
 )
 
@@ -62,6 +65,25 @@ class MainInputTests(unittest.TestCase):
 
         with patch("builtins.input", side_effect=["   ", "테스트 식당"]):
             self.assertEqual("테스트 식당", read_required_text("음식점명"))
+
+    def test_photo_folder_adds_supported_images_in_natural_order(self):
+        """폴더 하나를 입력하면 지원 사진만 숫자 기준 파일명 순서로 추가합니다."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            folder = Path(temp_dir)
+            # 일반 문자열 정렬과 차이가 나도록 1, 2, 10 번호의 사진을 만듭니다.
+            for filename in ("photo10.jpg", "photo2.png", "photo1.webp"):
+                (folder / filename).write_bytes(b"image")
+            # 지원하지 않는 TXT 파일은 자동으로 제외되어야 합니다.
+            (folder / "memo.txt").write_text("not image", encoding="utf-8")
+
+            with patch("builtins.input", side_effect=[str(folder), ""]):
+                paths = read_image_paths()
+
+            self.assertEqual(
+                ["photo1.webp", "photo2.png", "photo10.jpg"],
+                [path.name for path in paths],
+            )
 
 
 # 이 파일을 직접 실행해도 테스트가 시작되게 합니다.

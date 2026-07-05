@@ -7,6 +7,8 @@ from __future__ import annotations
 
 # 사용자가 입력한 Windows 사진 경로를 처리합니다.
 from pathlib import Path
+# 파일명 속 숫자를 실제 숫자 순서로 정렬하기 위해 사용합니다.
+import re
 
 # ChatGPT용 프롬프트를 클립보드에 복사하는 기능입니다.
 from clipboard_utils import ClipboardError, copy_to_clipboard
@@ -150,17 +152,18 @@ def read_required_text(label: str) -> str:
 
 
 def read_image_paths() -> list[Path]:
-    """빈 줄이 입력될 때까지 사진 경로를 여러 개 받습니다."""
+    """사진 파일이나 폴더 경로를 받아 지원 이미지를 한꺼번에 수집합니다."""
 
-    # 사진을 여러 장 입력하고 끝내는 방법을 안내합니다.
-    print("사진 파일 경로를 한 줄에 하나씩 입력해주세요.")
+    # 개별 파일뿐 아니라 사진이 모인 폴더도 한 번에 입력할 수 있다고 안내합니다.
+    print("사진 파일 또는 사진 폴더 경로를 입력해주세요.")
+    print("폴더를 입력하면 내부의 지원 이미지를 파일명 순서로 모두 추가합니다.")
     print("입력을 마치려면 빈 줄에서 Enter를 누르세요.")
     # 입력된 경로를 순서대로 보관할 빈 목록입니다.
     paths: list[Path] = []
     # 사용자가 빈 줄을 입력할 때까지 계속 반복합니다.
     while True:
         # 탐색기의 '경로로 복사'가 붙이는 바깥 큰따옴표도 제거합니다.
-        value = input(f"사진 {len(paths) + 1}: ").strip().strip('"')
+        value = input(f"사진/폴더 {len(paths) + 1}: ").strip().strip('"')
         # 빈 줄을 사진 입력 완료 신호로 사용합니다.
         if not value:
             # 사진을 한 장도 넣지 않았다면 종료하지 않고 첫 사진부터 다시 받습니다.
@@ -170,18 +173,65 @@ def read_image_paths() -> list[Path]:
             break
         # 홈 폴더 표현을 확장하고 절대 경로로 바꿔 저장합니다.
         path = Path(value).expanduser().resolve()
-        # 존재하지 않거나 폴더인 경로는 목록에 넣지 않고 같은 번호를 다시 묻습니다.
-        if not path.exists() or not path.is_file():
-            print(f"[안내] 사진 파일을 찾을 수 없습니다: {path}")
+        # 존재하지 않는 경로는 목록에 넣지 않고 같은 번호를 다시 묻습니다.
+        if not path.exists():
+            print(f"[안내] 파일 또는 폴더를 찾을 수 없습니다: {path}")
+            continue
+        # 폴더가 입력되면 바로 아래에 있는 지원 이미지들을 자연스러운 순서로 찾습니다.
+        if path.is_dir():
+            folder_images = sorted(
+                (
+                    item.resolve()
+                    for item in path.iterdir()
+                    if item.is_file()
+                    and item.suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS
+                ),
+                key=_natural_path_sort_key,
+            )
+            # 지원 이미지가 없는 폴더는 이유를 안내하고 다른 경로를 받습니다.
+            if not folder_images:
+                print(f"[안내] 폴더에 지원되는 사진이 없습니다: {path}")
+                continue
+            # 이미 개별 입력했거나 다른 폴더에서 추가된 같은 사진은 제외합니다.
+            new_images = [item for item in folder_images if item not in paths]
+            paths.extend(new_images)
+            print(
+                f"[안내] 폴더에서 사진 {len(new_images)}장을 추가했습니다. "
+                f"(현재 총 {len(paths)}장)"
+            )
+            # 실제 업로드 순서를 사용자가 확인할 수 있도록 파일명을 보여줍니다.
+            for index, image_path in enumerate(new_images, len(paths) - len(new_images) + 1):
+                print(f"  {index}. {image_path.name}")
+            continue
+        # 폴더가 아니라면 일반 파일인지 다시 확인합니다.
+        if not path.is_file():
+            print(f"[안내] 일반 사진 파일이 아닙니다: {path}")
             continue
         # OpenAI와 Ollama가 지원하지 않는 확장자도 입력 단계에서 바로 안내합니다.
         if path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
             allowed = ", ".join(sorted(SUPPORTED_IMAGE_EXTENSIONS))
             print(f"[안내] 지원하지 않는 사진 형식입니다. 지원 형식: {allowed}")
             continue
+        # 같은 사진을 두 번 입력한 경우에는 중복으로 업로드하지 않습니다.
+        if path in paths:
+            print(f"[안내] 이미 추가된 사진입니다: {path.name}")
+            continue
         paths.append(path)
     # 한 번에 수집한 모든 사진 경로를 반환합니다.
     return paths
+
+
+def _natural_path_sort_key(path: Path) -> list[tuple[int, int | str]]:
+    """`사진2`가 `사진10`보다 먼저 오도록 숫자를 고려한 정렬 키를 만듭니다."""
+
+    # 파일명을 숫자 부분과 일반 문자 부분으로 나눕니다.
+    parts = re.split(r"(\d+)", path.name.casefold())
+    # 숫자와 문자열을 직접 비교하지 않도록 종류 표시와 값을 튜플로 묶습니다.
+    return [
+        (0, int(part)) if part.isdigit() else (1, part)
+        for part in parts
+        if part
+    ]
 
 
 def collect_input() -> ReviewInput:
