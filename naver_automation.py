@@ -19,6 +19,7 @@ from typing import Any
 # Playwright의 동기식 Python API로 실제 Chrome 브라우저를 조작합니다.
 from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Locator, Page, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
 
 class NaverAutomationError(Exception):
@@ -65,6 +66,7 @@ PHOTO_BUTTON_SELECTORS = (
     "button.se-image-toolbar-button",
     "button[aria-label*='사진']",
     "button:has-text('사진')",
+    "button.se-insert-menu-button-image",
 )
 
 
@@ -258,20 +260,47 @@ class NaverBlogAutomator:
         paragraph.click()
         page.keyboard.press("End")
         page.keyboard.press("Enter")
-        # 현재 스마트에디터에서 보이는 사진 도구 버튼을 찾습니다.
-        photo_button = self._find_first_visible(page, PHOTO_BUTTON_SELECTORS)
-        try:
-            # 버튼이 만드는 동적 파일 선택 창을 Playwright가 직접 가로챕니다.
-            with page.expect_file_chooser(timeout=10_000) as chooser_info:
-                photo_button.click()
-            # 운영체제 파일 선택 대화상자를 띄우지 않고 해당 사진을 지정합니다.
-            chooser_info.value.set_files(str(image_path))
-            # 네이버가 사진 업로드와 에디터 컴포넌트 생성을 마칠 시간을 줍니다.
-            page.wait_for_timeout(2_000)
-        except PlaywrightError as exc:
-            raise NaverAutomationError(
-                f"사진 업로드 창을 처리하지 못했습니다 ({image_path.name}): {exc}"
-            ) from exc
+        # 네이버가 첫 업로드를 정리하는 동안 다음 클릭을 무시할 수 있어 재시도합니다.
+        last_error: PlaywrightError | None = None
+        attempts = 0
+        # 기본 툴바와 본문 삽입 메뉴의 사진 버튼을 모두 후보로 검사합니다.
+        for scope in self._scopes(page):
+            for selector in PHOTO_BUTTON_SELECTORS:
+                locator = scope.locator(selector)
+                for index in range(locator.count()):
+                    candidate = locator.nth(index)
+                    try:
+                        if not candidate.is_visible():
+                            continue
+                    except PlaywrightError:
+                        continue
+                    # 같은 버튼도 업로드 상태가 풀린 뒤 다시 동작할 수 있어 두 번 시도합니다.
+                    for retry in range(2):
+                        attempts += 1
+                        try:
+                            # 클릭 순간 생성되는 동적 파일 선택 이벤트를 기다립니다.
+                            with page.expect_file_chooser(timeout=5_000) as chooser_info:
+                                candidate.click(
+                                    timeout=5_000,
+                                    # 두 번째 시도는 일시적인 투명 레이어가 있어도 클릭합니다.
+                                    force=(retry > 0),
+                                )
+                            # 운영체제 대화상자 없이 해당 사진 파일을 지정합니다.
+                            chooser_info.value.set_files(str(image_path))
+                            # 업로드 및 이미지 컴포넌트 생성이 끝날 충분한 시간을 둡니다.
+                            page.wait_for_timeout(5_000)
+                            return
+                        except (PlaywrightTimeoutError, PlaywrightError) as exc:
+                            last_error = exc
+                            # 열린 메뉴나 툴팁을 닫고 다음 버튼 시도를 준비합니다.
+                            page.keyboard.press("Escape")
+                            page.wait_for_timeout(700)
+
+        # 모든 사진 버튼 후보가 실패했을 때 파일명과 시도 횟수를 함께 안내합니다.
+        raise NaverAutomationError(
+            f"사진 업로드 창을 처리하지 못했습니다 ({image_path.name}, "
+            f"시도 {attempts}회): {last_error}"
+        ) from last_error
 
     def fill_draft(
         self,
