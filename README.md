@@ -1,17 +1,21 @@
 # 개인용 네이버 블로그 작성 비서
 
-사진과 간단한 리뷰 정보를 OpenAI API에 전달해 네이버 블로그용 초안을
-만드는 Python 콘솔 프로그램입니다. 자동 로그인이나 자동 게시 기능은
+사진과 간단한 리뷰 정보로 네이버 블로그용 초안을 만드는 Python 콘솔
+프로그램입니다. ChatGPT 수동 사용, Ollama 로컬 모델, OpenAI API 중
+원하는 방식을 선택할 수 있습니다. 자동 로그인이나 자동 게시 기능은
 포함하지 않습니다.
 
 ## 주요 기능
 
 - 음식점 리뷰와 상품 리뷰 템플릿 분리
-- 로컬 사진 여러 장을 Vision 입력으로 분석
+- ChatGPT Plus에 직접 붙여넣을 프롬프트 생성 및 클립보드 복사
+- Ollama 로컬 Vision 모델을 이용한 무료 글 생성
+- OpenAI API를 이용한 Vision 글 생성
 - 제목 후보 5개, 본문, 태그 10개 생성
 - 결과를 `outputs/generated_posts`에 UTF-8 텍스트 파일로 저장
-- `.env`의 API Key와 `data/settings.json`의 개인 문체 설정 사용
-- 입력, API 호출, 파일 저장 오류 처리
+- ChatGPT용 프롬프트를 `outputs/generated_prompts`에 별도 저장
+- `data/settings.json`의 개인 문체 설정을 모든 모드에서 공유
+- 입력, 클립보드, Ollama, OpenAI API, 파일 저장 오류 처리
 
 ## 폴더 구조
 
@@ -20,12 +24,19 @@ project4/
 ├── main.py                 # 콘솔 입력과 전체 실행 흐름
 ├── config.py               # 환경 변수와 settings.json 로드
 ├── openai_client.py        # 이미지 인코딩과 OpenAI API 호출
+├── ollama_client.py        # 로컬 Ollama Vision API 호출
+├── clipboard_utils.py      # ChatGPT 프롬프트 클립보드 복사
+├── output_schema.py        # 두 AI 제공자가 공유하는 결과 구조
 ├── post_generator.py       # 입력 검증, 프롬프트 구성, 결과 저장
 ├── prompts/
 │   ├── restaurant_review.txt
 │   └── product_review.txt
 ├── outputs/
-│   └── generated_posts/
+│   ├── generated_posts/
+│   └── generated_prompts/
+├── tests/
+│   ├── test_post_generator.py
+│   └── test_ollama_client.py
 ├── data/
 │   └── settings.json
 ├── .env.example
@@ -36,11 +47,11 @@ project4/
 ## 준비 사항
 
 - Python 3.10 이상
-- OpenAI API Key
 - PNG, JPG/JPEG, WEBP 또는 움직이지 않는 GIF 사진
 
-API 사용에는 계정의 API 요금이 발생할 수 있습니다. 사진 수가 많을수록
-입력 토큰과 비용도 늘어납니다.
+ChatGPT 수동 모드는 ChatGPT 계정만 있으면 사용할 수 있습니다.
+Ollama 모드는 Ollama와 Vision 모델 설치가 필요합니다. OpenAI API
+모드만 별도의 API Key와 API 요금이 필요합니다.
 
 ## 설치 방법
 
@@ -52,30 +63,78 @@ python -m venv .venv
 python -m pip install -r requirements.txt
 ```
 
-환경 변수 예시 파일을 복사합니다.
+선택 설정을 사용하려면 환경 변수 예시 파일을 복사합니다.
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-생성된 `.env`를 열어 `OPENAI_API_KEY`에 실제 Key를 입력합니다.
-`.env`는 `.gitignore`에 포함되어 있으므로 저장소에 커밋되지 않습니다.
+ChatGPT 수동 모드는 `.env` 없이도 실행됩니다. Ollama 또는 OpenAI
+설정을 바꾸려면 생성된 `.env`를 수정합니다. `.env`는 `.gitignore`에
+포함되어 저장소에 커밋되지 않습니다.
 
 ```dotenv
 OPENAI_API_KEY=sk-실제_API_Key
 OPENAI_MODEL=gpt-5.4-mini
+OLLAMA_MODEL=gemma3:4b
+OLLAMA_BASE_URL=http://localhost:11434
 ```
 
-## 실행 방법
+## 실행 방법과 모드 선택
 
 ```powershell
 python main.py
 ```
 
-화면 안내에 따라 리뷰 종류, 이름, 링크, 메모, 별점과 사진 경로를
-입력합니다. 사진 경로는 한 줄에 하나씩 입력하고, 모두 입력한 뒤 빈
-줄에서 Enter를 누릅니다. Windows 탐색기의 **경로로 복사** 기능으로
-가져온 따옴표 포함 경로도 사용할 수 있습니다.
+프로그램을 실행하면 세 가지 방식을 선택할 수 있습니다.
+
+```text
+1. ChatGPT용 프롬프트 만들기
+2. Ollama 로컬 모델로 글 생성
+3. OpenAI API로 글 생성
+```
+
+그다음 리뷰 종류, 이름, 링크, 메모, 별점과 사진 경로를 입력합니다.
+사진 경로는 한 줄에 하나씩 입력하고, 모두 입력한 뒤 빈 줄에서 Enter를
+누릅니다. Windows 탐색기의 **경로로 복사** 기능으로 가져온 따옴표
+포함 경로도 사용할 수 있습니다.
+
+## 1. ChatGPT Plus 수동 모드
+
+이 모드는 OpenAI API를 호출하지 않으므로 별도 API 요금이 없습니다.
+입력 완료 후 다음 작업이 자동으로 처리됩니다.
+
+1. 사진과 리뷰 정보에 맞는 상세 프롬프트를 생성합니다.
+2. 프롬프트를 Windows 클립보드에 복사합니다.
+3. 프롬프트와 첨부할 사진 목록을 TXT 파일로 저장합니다.
+
+ChatGPT 대화창에 안내된 사진을 모두 첨부하고 `Ctrl+V`로 프롬프트를
+붙여넣은 뒤 전송하면 됩니다.
+
+```text
+outputs/generated_prompts/YYYYMMDD_HHMMSS_이름_prompt.txt
+```
+
+## 2. Ollama 로컬 모드
+
+Ollama 공식 사이트에서 Windows용 Ollama를 설치하고 PowerShell에서
+기본 Vision 모델을 내려받습니다.
+
+```powershell
+ollama pull gemma3:4b
+```
+
+Ollama가 실행 중인 상태에서 `python main.py`를 실행하고 2번을
+선택합니다. 사진과 프롬프트는 기본 설정에서 `localhost`의 Ollama로만
+전달되며 OpenAI API 요금은 발생하지 않습니다.
+
+PC 메모리가 부족하거나 더 작은 모델을 사용하고 싶다면 `.env`의
+`OLLAMA_MODEL`을 설치된 다른 Vision 모델 이름으로 변경할 수 있습니다.
+
+## 3. OpenAI API 모드
+
+`.env`의 `OPENAI_API_KEY`에 실제 API Key를 입력합니다. 이 모드는
+ChatGPT Plus와 별도로 API 사용량에 따른 요금이 발생합니다.
 
 생성이 끝나면 결과가 콘솔에 표시되고 다음 위치에 저장됩니다.
 
@@ -95,8 +154,11 @@ outputs/generated_posts/YYYYMMDD_HHMMSS_이름.txt
 
 - `OPENAI_API_KEY가 없습니다`: `.env` 파일과 Key 값을 확인합니다.
 - `사진 파일을 찾을 수 없습니다`: 경로가 정확하고 파일이 존재하는지 확인합니다.
+- `Ollama 서버에 연결할 수 없습니다`: Ollama 프로그램이 실행 중인지 확인합니다.
+- Ollama HTTP 404 또는 모델 오류: `ollama pull gemma3:4b`를 실행합니다.
 - `OpenAI API 호출에 실패했습니다`: 인터넷 연결, API Key, 사용 한도와 모델 접근 권한을 확인합니다.
+- `클립보드에 복사할 수 없습니다`: 저장된 프롬프트 TXT 파일을 직접 복사합니다.
 - `파일 저장에 실패했습니다`: 출력 폴더 쓰기 권한과 디스크 여유 공간을 확인합니다.
 
-실제 API 호출이 실패해도 오류 메시지를 출력한 뒤 프로그램이 안전하게
-종료되며, Python 예외 화면이 그대로 노출되지 않습니다.
+Ollama나 OpenAI 호출이 실패해도 오류 메시지를 출력한 뒤 프로그램이
+안전하게 종료되며, Python 예외 화면이 그대로 노출되지 않습니다.

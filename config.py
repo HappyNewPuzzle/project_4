@@ -29,6 +29,8 @@ PROMPTS_DIR = BASE_DIR / "prompts"
 SETTINGS_PATH = BASE_DIR / "data" / "settings.json"
 # 완성된 리뷰 TXT 파일을 저장할 폴더입니다.
 OUTPUT_DIR = BASE_DIR / "outputs" / "generated_posts"
+# ChatGPT에 붙여넣을 프롬프트 TXT 파일을 저장할 폴더입니다.
+PROMPT_OUTPUT_DIR = BASE_DIR / "outputs" / "generated_prompts"
 
 
 class ConfigError(Exception):
@@ -39,10 +41,14 @@ class ConfigError(Exception):
 class AppConfig:
     """프로그램 전체에서 사용하는 설정을 읽기 전용으로 묶습니다."""
 
-    # OpenAI API 인증용 비밀 Key입니다.
-    api_key: str
-    # 사진 분석과 글 생성에 사용할 모델 이름입니다.
-    model: str
+    # OpenAI API 인증용 Key이며 수동·Ollama 모드에서는 없어도 됩니다.
+    openai_api_key: str | None
+    # OpenAI API 모드에서 사용할 Vision 모델 이름입니다.
+    openai_model: str
+    # Ollama 로컬 모드에서 사용할 Vision 모델 이름입니다.
+    ollama_model: str
+    # 로컬 Ollama REST API의 기본 주소입니다.
+    ollama_base_url: str
     # settings.json에서 읽은 말투와 고정 문구입니다.
     settings: dict[str, str]
 
@@ -80,14 +86,14 @@ def _load_settings() -> dict[str, str]:
     return {key: str(value) for key, value in data.items()}
 
 
-def load_config() -> AppConfig:
-    """`.env`와 `settings.json`을 읽어 실행 설정을 반환합니다."""
+def load_config(require_openai_key: bool = False) -> AppConfig:
+    """`.env`와 settings.json을 읽고 선택 모드에 필요한 설정을 반환합니다."""
 
     # 프로젝트 폴더에 있는 .env 파일만 명시적으로 불러옵니다.
     load_dotenv(BASE_DIR / ".env")
     # Key 양끝에 실수로 들어간 공백을 제거합니다.
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip() or None
+    if require_openai_key and not api_key:
         # Key가 없으면 유료 요청을 시도하기 전에 해결 방법을 안내합니다.
         raise ConfigError(
             "OPENAI_API_KEY가 없습니다. .env.example을 복사해 .env를 만들고 "
@@ -95,10 +101,26 @@ def load_config() -> AppConfig:
         )
 
     # 모델을 지정하지 않았을 때 사용할 기본 Vision 모델을 설정합니다.
-    model = os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip()
-    if not model:
+    openai_model = os.getenv("OPENAI_MODEL", "gpt-5.4-mini").strip()
+    if not openai_model:
         # 환경 변수 이름만 있고 값이 비어 있는 경우도 오류로 처리합니다.
         raise ConfigError("OPENAI_MODEL 값이 비어 있습니다.")
 
-    # 검증된 API 정보와 블로그 스타일을 하나의 설정 객체로 반환합니다.
-    return AppConfig(api_key=api_key, model=model, settings=_load_settings())
+    # Ollama Vision 모델은 설치 안내가 쉬운 gemma3:4b를 기본값으로 사용합니다.
+    ollama_model = os.getenv("OLLAMA_MODEL", "gemma3:4b").strip()
+    if not ollama_model:
+        raise ConfigError("OLLAMA_MODEL 값이 비어 있습니다.")
+
+    # 다른 PC나 포트를 사용할 수 있도록 서버 주소도 환경 변수로 분리합니다.
+    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
+    if not ollama_base_url:
+        raise ConfigError("OLLAMA_BASE_URL 값이 비어 있습니다.")
+
+    # 세 실행 모드에서 함께 사용할 설정 객체를 반환합니다.
+    return AppConfig(
+        openai_api_key=api_key,
+        openai_model=openai_model,
+        ollama_model=ollama_model,
+        ollama_base_url=ollama_base_url,
+        settings=_load_settings(),
+    )

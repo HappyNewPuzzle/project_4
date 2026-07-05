@@ -8,8 +8,12 @@ from __future__ import annotations
 # 사용자가 입력한 Windows 사진 경로를 처리합니다.
 from pathlib import Path
 
+# ChatGPT용 프롬프트를 클립보드에 복사하는 기능입니다.
+from clipboard_utils import ClipboardError, copy_to_clipboard
 # 환경 변수와 블로그 스타일을 읽는 기능입니다.
 from config import ConfigError, load_config
+# 로컬 Ollama Vision 모델 클라이언트와 통신 오류입니다.
+from ollama_client import BlogOllamaClient, OllamaClientError
 # OpenAI API 클라이언트와 통신 오류입니다.
 from openai_client import BlogOpenAIClient, OpenAIClientError
 # 입력, 생성, 출력, 저장에 필요한 핵심 기능입니다.
@@ -17,10 +21,31 @@ from post_generator import (
     InputError,
     ReviewInput,
     SaveError,
+    build_chatgpt_prompt,
     format_post,
     generate_post,
+    save_chatgpt_prompt,
     save_post,
 )
+
+
+def choose_generation_mode() -> str:
+    """ChatGPT 수동, Ollama 로컬, OpenAI API 중 실행 모드를 선택합니다."""
+
+    # 각 모드의 비용과 동작 차이를 선택 화면에서 바로 설명합니다.
+    print("\n글 생성 방식을 선택해주세요.")
+    print("1. ChatGPT용 프롬프트 만들기 (Plus에서 직접 붙여넣기)")
+    print("2. Ollama 로컬 모델로 글 생성 (API 요금 없음)")
+    print("3. OpenAI API로 글 생성 (API 요금 별도)")
+    # 사용자가 입력한 번호의 양끝 공백을 제거합니다.
+    choice = input("선택 (1/2/3): ").strip()
+    # 화면 번호를 프로그램 내부에서 사용할 모드 이름에 연결합니다.
+    choices = {"1": "chatgpt", "2": "ollama", "3": "openai"}
+    # 목록에 없는 값은 이후 입력을 받기 전에 거부합니다.
+    if choice not in choices:
+        raise InputError("1, 2, 3 중 하나를 입력해주세요.")
+    # 선택된 내부 모드 이름을 반환합니다.
+    return choices[choice]
 
 
 def choose_review_type() -> str:
@@ -102,15 +127,59 @@ def run() -> int:
     print("=" * 50)
 
     try:
-        # API Key, 모델, 개인 스타일 설정을 먼저 읽습니다.
-        config = load_config()
+        # API 사용 여부를 먼저 정해 불필요한 API Key 요구를 피합니다.
+        mode = choose_generation_mode()
+        # OpenAI 모드에서만 API Key를 필수로 검사합니다.
+        config = load_config(require_openai_key=(mode == "openai"))
         # 리뷰 정보와 사진 경로를 콘솔에서 수집합니다.
         review = collect_input()
-        # 읽은 API Key와 모델로 OpenAI 클라이언트를 만듭니다.
-        client = BlogOpenAIClient(config.api_key, config.model)
 
-        # 네트워크 처리 중임을 사용자가 알 수 있게 표시합니다.
-        print(f"\n사진을 분석하고 글을 생성하는 중입니다... ({config.model})")
+        # ChatGPT 수동 모드는 API를 호출하지 않고 붙여넣을 프롬프트만 만듭니다.
+        if mode == "chatgpt":
+            # 템플릿과 사용자 정보를 합친 완성 프롬프트를 만듭니다.
+            prompt = build_chatgpt_prompt(review, config.settings)
+            # 첨부할 사진 목록과 프롬프트를 나중에도 볼 수 있게 저장합니다.
+            output_path = save_chatgpt_prompt(prompt, review)
+
+            try:
+                # ChatGPT 대화창에서 바로 붙여넣을 수 있도록 자동 복사합니다.
+                copy_to_clipboard(prompt)
+                clipboard_message = "프롬프트를 클립보드에 복사했습니다."
+            except ClipboardError as exc:
+                # 복사가 실패해도 저장 파일과 콘솔 결과는 계속 사용할 수 있습니다.
+                clipboard_message = f"자동 복사는 실패했습니다: {exc}"
+
+            # 사용자가 직접 선택해 복사할 수도 있도록 콘솔에도 프롬프트를 표시합니다.
+            print("\n=== ChatGPT에 붙여넣을 프롬프트 ===")
+            print(prompt)
+            print(f"\n{clipboard_message}")
+            print(f"저장 완료: {output_path}")
+            print("사진을 ChatGPT에 먼저 첨부한 뒤 프롬프트를 붙여넣어주세요.")
+            return 0
+
+        # Ollama 모드는 API Key 없이 로컬 REST API 클라이언트를 만듭니다.
+        if mode == "ollama":
+            client = BlogOllamaClient(
+                base_url=config.ollama_base_url,
+                model=config.ollama_model,
+            )
+            selected_model = config.ollama_model
+            provider_name = "Ollama"
+        else:
+            # OpenAI 모드에서는 설정 단계에서 Key 존재가 이미 확인됐습니다.
+            assert config.openai_api_key is not None
+            client = BlogOpenAIClient(
+                config.openai_api_key,
+                config.openai_model,
+            )
+            selected_model = config.openai_model
+            provider_name = "OpenAI API"
+
+        # 모델 실행 중임을 사용자가 알 수 있게 표시합니다.
+        print(
+            f"\n사진을 분석하고 글을 생성하는 중입니다... "
+            f"({provider_name}: {selected_model})"
+        )
         # 입력과 사진을 이용해 구조화된 리뷰 글을 생성합니다.
         post = generate_post(review, config.settings, client)
         # 생성에 성공한 결과를 TXT 파일로 저장합니다.
@@ -122,7 +191,13 @@ def run() -> int:
         print(f"저장 완료: {output_path}")
         # 정상 종료를 뜻하는 코드 0을 반환합니다.
         return 0
-    except (ConfigError, InputError, OpenAIClientError, SaveError) as exc:
+    except (
+        ConfigError,
+        InputError,
+        OllamaClientError,
+        OpenAIClientError,
+        SaveError,
+    ) as exc:
         # 예상 가능한 오류는 복잡한 추적 정보 없이 메시지만 표시합니다.
         print(f"\n[오류] {exc}")
         return 1

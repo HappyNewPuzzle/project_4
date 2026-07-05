@@ -13,11 +13,11 @@ from dataclasses import dataclass
 from datetime import datetime
 # 사진, 프롬프트, 출력 파일의 경로를 처리합니다.
 from pathlib import Path
+# OpenAI와 Ollama 클라이언트가 따라야 할 공통 형태를 정의합니다.
+from typing import Any, Protocol
 
 # 공통 경로는 config.py에 정의된 값을 재사용합니다.
-from config import OUTPUT_DIR, PROMPTS_DIR
-# 실제 API 통신은 전용 OpenAI 클라이언트에 맡깁니다.
-from openai_client import BlogOpenAIClient
+from config import OUTPUT_DIR, PROMPT_OUTPUT_DIR, PROMPTS_DIR
 
 
 # OpenAI Vision이 입력으로 받을 수 있는 이미지 확장자입니다.
@@ -35,6 +35,15 @@ class InputError(Exception):
 
 class SaveError(Exception):
     """생성 결과 파일을 저장하지 못했을 때 발생합니다."""
+
+
+class BlogGenerationClient(Protocol):
+    """OpenAI와 Ollama 클라이언트가 공통으로 제공해야 하는 기능입니다."""
+
+    def generate_post(
+        self, instructions: str, user_prompt: str, image_paths: list[Path]
+    ) -> dict[str, Any]:
+        """프롬프트와 사진을 받아 블로그 글 딕셔너리를 반환합니다."""
 
 
 @dataclass(frozen=True)
@@ -57,7 +66,7 @@ class ReviewInput:
 
 @dataclass(frozen=True)
 class GeneratedPost:
-    """OpenAI가 만든 최종 블로그 결과를 담는 읽기 전용 객체입니다."""
+    """선택한 AI 모델이 만든 최종 블로그 결과를 담는 읽기 전용 객체입니다."""
 
     # 사용자가 선택할 다섯 개 제목입니다.
     title_candidates: list[str]
@@ -114,14 +123,12 @@ def _load_template(review_type: str) -> str:
         raise InputError(f"프롬프트 파일을 읽을 수 없습니다: {exc}") from exc
 
 
-def generate_post(
-    review: ReviewInput,
-    settings: dict[str, str],
-    client: BlogOpenAIClient,
-) -> GeneratedPost:
-    """입력 정보와 사진으로 하나의 블로그 글을 생성합니다."""
+def build_generation_prompts(
+    review: ReviewInput, settings: dict[str, str]
+) -> tuple[str, str]:
+    """모든 AI 제공자가 공유할 고정 지침과 사용자 프롬프트를 만듭니다."""
 
-    # 잘못된 입력으로 API 비용이 발생하지 않도록 가장 먼저 검사합니다.
+    # 잘못된 입력으로 모델 호출이나 수동 작업이 시작되지 않도록 먼저 검사합니다.
     validate_review(review)
     # 음식점 또는 상품에 맞는 글 구조를 파일에서 읽습니다.
     template = _load_template(review.review_type)
@@ -155,8 +162,46 @@ def generate_post(
         f"- 사진 수: {len(review.image_paths)}장\n\n"
         "위 정보와 첨부 사진을 바탕으로 한국어 네이버 블로그 리뷰 초안을 작성해주세요."
     )
+    # 제공자별 클라이언트가 같은 프롬프트를 사용하도록 두 문자열을 함께 반환합니다.
+    return instructions, user_prompt
 
-    # 준비된 지침과 모든 사진을 OpenAI 클라이언트에 전달합니다.
+
+def build_chatgpt_prompt(
+    review: ReviewInput, settings: dict[str, str]
+) -> str:
+    """사진과 함께 ChatGPT에 직접 붙여넣을 완성 프롬프트를 만듭니다."""
+
+    # API와 동일한 리뷰 구조 및 개인 스타일 지침을 재사용합니다.
+    instructions, user_prompt = build_generation_prompts(review, settings)
+    # 수동 모드에서는 JSON 대신 사람이 바로 복사할 수 있는 일반 텍스트를 요청합니다.
+    return (
+        "아래 작성 규칙과 리뷰 정보를 모두 반영해 결과만 작성해주세요.\n"
+        f"이 메시지와 함께 첨부한 사진 {len(review.image_paths)}장도 분석해주세요.\n\n"
+        "=== 작성 규칙 ===\n"
+        f"{instructions}\n\n"
+        "=== 사용자 리뷰 정보 ===\n"
+        f"{user_prompt}\n\n"
+        "=== 출력 형식 ===\n"
+        "=== 제목 후보 5개 ===\n"
+        "1. 제목\n2. 제목\n3. 제목\n4. 제목\n5. 제목\n\n"
+        "=== 블로그 본문 ===\n"
+        "완성된 본문\n\n"
+        "=== 네이버 블로그 태그 10개 ===\n"
+        "#태그1 #태그2 #태그3 #태그4 #태그5 #태그6 #태그7 #태그8 #태그9 #태그10\n\n"
+        "JSON이나 코드 블록을 사용하지 말고 위 형식의 한국어 결과만 출력해주세요."
+    )
+
+
+def generate_post(
+    review: ReviewInput,
+    settings: dict[str, str],
+    client: BlogGenerationClient,
+) -> GeneratedPost:
+    """입력 정보와 사진으로 OpenAI 또는 Ollama 블로그 글을 생성합니다."""
+
+    # 두 AI 제공자에서 함께 사용할 지침과 사용자 정보를 만듭니다.
+    instructions, user_prompt = build_generation_prompts(review, settings)
+    # 준비된 지침과 모든 사진을 선택한 AI 클라이언트에 전달합니다.
     raw = client.generate_post(instructions, user_prompt, review.image_paths)
     # 응답에서 제목, 본문, 태그를 각각 꺼냅니다.
     titles = raw.get("title_candidates")
@@ -204,13 +249,20 @@ def format_post(post: GeneratedPost) -> str:
     )
 
 
-def save_post(post: GeneratedPost, review_name: str) -> Path:
-    """생성 결과를 시간과 리뷰 이름이 포함된 TXT 파일로 저장합니다."""
+def _safe_review_name(review_name: str) -> str:
+    """리뷰 이름을 Windows에서 안전한 짧은 파일명 조각으로 바꿉니다."""
 
     # Windows 파일명에 금지된 문자와 제어 문자를 밑줄로 바꿉니다.
     safe_name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", review_name).strip(" ._")
     # 파일명이 너무 길거나 완전히 비는 경우를 방지합니다.
-    safe_name = safe_name[:50] or "review"
+    return safe_name[:50] or "review"
+
+
+def save_post(post: GeneratedPost, review_name: str) -> Path:
+    """생성 결과를 시간과 리뷰 이름이 포함된 TXT 파일로 저장합니다."""
+
+    # 공통 파일명 정리 함수를 사용해 안전한 이름을 만듭니다.
+    safe_name = _safe_review_name(review_name)
     # 같은 리뷰도 덮어쓰지 않도록 현재 시각을 파일명에 붙입니다.
     filename = f"{datetime.now():%Y%m%d_%H%M%S}_{safe_name}.txt"
     # 출력 폴더와 안전한 파일명을 결합합니다.
@@ -226,4 +278,41 @@ def save_post(post: GeneratedPost, review_name: str) -> Path:
         raise SaveError(f"파일 저장에 실패했습니다: {exc}") from exc
 
     # 메인 화면에서 저장 위치를 보여줄 수 있도록 경로를 반환합니다.
+    return output_path
+
+
+def save_chatgpt_prompt(prompt: str, review: ReviewInput) -> Path:
+    """ChatGPT용 프롬프트와 첨부할 사진 목록을 TXT 파일로 저장합니다."""
+
+    # 사용자가 ChatGPT에 올릴 사진을 헷갈리지 않도록 번호와 경로를 기록합니다.
+    image_list = "\n".join(
+        f"{index}. {path}" for index, path in enumerate(review.image_paths, 1)
+    )
+    # 저장 파일에는 사용 순서, 사진 체크리스트, 실제 프롬프트를 함께 넣습니다.
+    file_content = (
+        "=== 사용 방법 ===\n"
+        "1. 아래 사진을 ChatGPT 대화창에 모두 첨부하세요.\n"
+        "2. 클립보드에 복사된 프롬프트를 붙여넣고 전송하세요.\n\n"
+        "=== 첨부할 사진 ===\n"
+        f"{image_list}\n\n"
+        "=== ChatGPT에 붙여넣을 프롬프트 ===\n"
+        f"{prompt}\n"
+    )
+    # Windows에서 사용할 수 있는 안전한 리뷰 이름을 만듭니다.
+    safe_name = _safe_review_name(review.name)
+    # 생성 시각을 포함해 기존 프롬프트 파일을 덮어쓰지 않게 합니다.
+    filename = f"{datetime.now():%Y%m%d_%H%M%S}_{safe_name}_prompt.txt"
+    # 프롬프트 전용 출력 폴더와 파일명을 결합합니다.
+    output_path = PROMPT_OUTPUT_DIR / filename
+
+    try:
+        # 출력 폴더가 없으면 자동으로 생성합니다.
+        PROMPT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        # 한글과 이모티콘을 보존하는 UTF-8 텍스트로 저장합니다.
+        output_path.write_text(file_content, encoding="utf-8")
+    except OSError as exc:
+        # 디스크나 권한 문제를 공통 저장 오류로 바꿉니다.
+        raise SaveError(f"프롬프트 파일 저장에 실패했습니다: {exc}") from exc
+
+    # 메인 화면에서 저장 위치를 알려줄 수 있도록 경로를 반환합니다.
     return output_path

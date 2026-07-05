@@ -18,40 +18,12 @@ from typing import Any
 
 # 공식 OpenAI Python SDK의 클라이언트를 사용합니다.
 from openai import OpenAI
+# Ollama 모드와 동일한 블로그 글 출력 구조를 공유합니다.
+from output_schema import BLOG_POST_SCHEMA
 
 
 class OpenAIClientError(Exception):
     """OpenAI 요청 또는 응답 처리에 실패했을 때 발생합니다."""
-
-
-# 모델이 반드시 지켜야 하는 최종 응답 구조를 정의합니다.
-BLOG_POST_SCHEMA: dict[str, Any] = {
-    # 최상위 응답은 JSON 객체여야 합니다.
-    "type": "object",
-    # 제목, 본문, 태그 각각의 자료형과 개수를 지정합니다.
-    "properties": {
-        "title_candidates": {
-            "type": "array",
-            "items": {"type": "string"},
-            # 제목 후보는 정확히 다섯 개로 제한합니다.
-            "minItems": 5,
-            "maxItems": 5,
-        },
-        # 본문은 복사 가능한 하나의 긴 문자열입니다.
-        "body": {"type": "string"},
-        "tags": {
-            "type": "array",
-            "items": {"type": "string"},
-            # 네이버 블로그 태그는 정확히 열 개로 제한합니다.
-            "minItems": 10,
-            "maxItems": 10,
-        },
-    },
-    # 세 필드 중 하나라도 빠진 응답은 허용하지 않습니다.
-    "required": ["title_candidates", "body", "tags"],
-    # 프로그램이 모르는 추가 필드가 생기지 않게 합니다.
-    "additionalProperties": False,
-}
 
 
 class BlogOpenAIClient:
