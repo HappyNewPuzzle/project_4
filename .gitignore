@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+outputs/generated_posts/*.txt
+!outputs/generated_posts/.gitkeep
