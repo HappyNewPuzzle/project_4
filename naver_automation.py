@@ -292,6 +292,8 @@ class NaverBlogAutomator:
                 context = playwright.chromium.launch_persistent_context(
                     user_data_dir=str(self.profile_dir),
                     channel="chrome",
+                    # 기본값 false에서 생기는 --no-sandbox 경고와 로그인 차단을 방지합니다.
+                    chromium_sandbox=True,
                     headless=False,
                     no_viewport=True,
                 )
