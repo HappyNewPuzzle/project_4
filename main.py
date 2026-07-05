@@ -11,7 +11,9 @@ from pathlib import Path
 # ChatGPT용 프롬프트를 클립보드에 복사하는 기능입니다.
 from clipboard_utils import ClipboardError, copy_to_clipboard
 # 환경 변수와 블로그 스타일을 읽는 기능입니다.
-from config import ConfigError, load_config
+from config import ConfigError, NAVER_BROWSER_PROFILE_DIR, load_config
+# 네이버 스마트에디터 반자동 배치 기능과 전용 오류입니다.
+from naver_automation import NaverAutomationError, NaverBlogAutomator
 # 로컬 Ollama Vision 모델 클라이언트와 통신 오류입니다.
 from ollama_client import BlogOllamaClient, OllamaClientError
 # OpenAI API 클라이언트와 통신 오류입니다.
@@ -46,6 +48,36 @@ def choose_generation_mode() -> str:
         raise InputError("1, 2, 3 중 하나를 입력해주세요.")
     # 선택된 내부 모드 이름을 반환합니다.
     return choices[choice]
+
+
+def ask_yes_no(message: str) -> bool:
+    """사용자에게 예/아니요를 입력받아 True 또는 False로 반환합니다."""
+
+    # 대소문자와 한글·영문 입력을 모두 허용합니다.
+    choice = input(f"{message} (y/n): ").strip().lower()
+    # 명확하지 않은 입력으로 브라우저가 열리지 않도록 허용값을 제한합니다.
+    if choice not in {"y", "yes", "예", "네", "n", "no", "아니오", "아니요"}:
+        raise InputError("y 또는 n으로 입력해주세요.")
+    # 긍정 표현이면 True, 부정 표현이면 False를 반환합니다.
+    return choice in {"y", "yes", "예", "네"}
+
+
+def choose_title(title_candidates: list[str]) -> str:
+    """네이버 편집기에 넣을 제목을 다섯 후보 중에서 선택합니다."""
+
+    # 이미 출력된 제목을 선택 화면에서도 다시 보여줍니다.
+    print("\n네이버 블로그에 사용할 제목을 선택해주세요.")
+    for index, title in enumerate(title_candidates, 1):
+        print(f"{index}. {title}")
+    # 문자열 입력을 숫자로 바꾸고 1부터 5 사이인지 검사합니다.
+    try:
+        choice = int(input("제목 번호 (1~5): ").strip())
+    except ValueError as exc:
+        raise InputError("제목 번호는 숫자로 입력해주세요.") from exc
+    if not 1 <= choice <= len(title_candidates):
+        raise InputError(f"1부터 {len(title_candidates)} 사이의 번호를 입력해주세요.")
+    # 목록은 0부터 시작하므로 사용자가 입력한 번호에서 1을 뺍니다.
+    return title_candidates[choice - 1]
 
 
 def choose_review_type() -> str:
@@ -189,11 +221,37 @@ def run() -> int:
         print("\n" + format_post(post))
         # 나중에 파일을 찾을 수 있도록 전체 저장 경로를 보여줍니다.
         print(f"저장 완료: {output_path}")
+
+        # 생성 후 원할 때만 네이버 브라우저 자동화를 시작합니다.
+        if ask_yes_no("\n네이버 글쓰기 화면에 사진과 본문을 자동 배치할까요?"):
+            # 다섯 제목 중 실제 편집기에 사용할 하나를 선택합니다.
+            selected_title = choose_title(post.title_candidates)
+            # 발행 설정의 태그 입력란에서 바로 붙여넣도록 태그를 복사합니다.
+            tag_text = " ".join(f"#{tag}" for tag in post.tags)
+            try:
+                copy_to_clipboard(tag_text)
+                print("태그 10개를 클립보드에 복사했습니다.")
+            except ClipboardError as exc:
+                # 자동 복사가 실패해도 본문 배치는 계속 진행할 수 있습니다.
+                print(f"[안내] 태그 자동 복사는 실패했습니다: {exc}")
+
+            # 로그인 상태를 보존하는 전용 Chrome 프로필로 편집기를 엽니다.
+            automator = NaverBlogAutomator(
+                write_url=config.naver_write_url,
+                profile_dir=NAVER_BROWSER_PROFILE_DIR,
+            )
+            # 제목, 사진, 본문만 채우고 발행은 사용자가 직접 결정합니다.
+            automator.fill_draft(
+                title=selected_title,
+                body=post.body,
+                image_paths=review.image_paths,
+            )
         # 정상 종료를 뜻하는 코드 0을 반환합니다.
         return 0
     except (
         ConfigError,
         InputError,
+        NaverAutomationError,
         OllamaClientError,
         OpenAIClientError,
         SaveError,

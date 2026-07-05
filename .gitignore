@@ -2,6 +2,7 @@
 .venv/
 __pycache__/
 *.py[cod]
+data/naver_browser_profile/
 outputs/generated_posts/*.txt
 !outputs/generated_posts/.gitkeep
 outputs/generated_prompts/*.txt

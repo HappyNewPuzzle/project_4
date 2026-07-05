@@ -31,6 +31,8 @@ SETTINGS_PATH = BASE_DIR / "data" / "settings.json"
 OUTPUT_DIR = BASE_DIR / "outputs" / "generated_posts"
 # ChatGPT에 붙여넣을 프롬프트 TXT 파일을 저장할 폴더입니다.
 PROMPT_OUTPUT_DIR = BASE_DIR / "outputs" / "generated_prompts"
+# 네이버 로그인 상태를 보관할 자동화 전용 Chrome 프로필 폴더입니다.
+NAVER_BROWSER_PROFILE_DIR = BASE_DIR / "data" / "naver_browser_profile"
 
 
 class ConfigError(Exception):
@@ -49,6 +51,8 @@ class AppConfig:
     ollama_model: str
     # 로컬 Ollama REST API의 기본 주소입니다.
     ollama_base_url: str
+    # 네이버 블로그 글쓰기 화면을 여는 주소입니다.
+    naver_write_url: str
     # settings.json에서 읽은 말투와 고정 문구입니다.
     settings: dict[str, str]
 
@@ -116,11 +120,20 @@ def load_config(require_openai_key: bool = False) -> AppConfig:
     if not ollama_base_url:
         raise ConfigError("OLLAMA_BASE_URL 값이 비어 있습니다.")
 
+    # 네이버가 로그인 사용자에게 제공하는 글쓰기 진입 주소를 설정합니다.
+    naver_write_url = os.getenv(
+        "NAVER_WRITE_URL",
+        "https://blog.naver.com/GoBlogWrite.naver",
+    ).strip()
+    if not naver_write_url:
+        raise ConfigError("NAVER_WRITE_URL 값이 비어 있습니다.")
+
     # 세 실행 모드에서 함께 사용할 설정 객체를 반환합니다.
     return AppConfig(
         openai_api_key=api_key,
         openai_model=openai_model,
         ollama_model=ollama_model,
         ollama_base_url=ollama_base_url,
+        naver_write_url=naver_write_url,
         settings=_load_settings(),
     )

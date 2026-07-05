@@ -11,6 +11,7 @@
 - ChatGPT Plus에 직접 붙여넣을 프롬프트 생성 및 클립보드 복사
 - Ollama 로컬 Vision 모델을 이용한 무료 글 생성
 - OpenAI API를 이용한 Vision 글 생성
+- 네이버 스마트에디터에 제목·사진·본문 반자동 배치
 - 제목 후보 5개, 본문, 태그 10개 생성
 - 결과를 `outputs/generated_posts`에 UTF-8 텍스트 파일로 저장
 - ChatGPT용 프롬프트를 `outputs/generated_prompts`에 별도 저장
@@ -27,6 +28,7 @@ project4/
 ├── ollama_client.py        # 로컬 Ollama Vision API 호출
 ├── clipboard_utils.py      # ChatGPT 프롬프트 클립보드 복사
 ├── output_schema.py        # 두 AI 제공자가 공유하는 결과 구조
+├── naver_automation.py     # Chrome에서 네이버 편집기 반자동 입력
 ├── post_generator.py       # 입력 검증, 프롬프트 구성, 결과 저장
 ├── prompts/
 │   ├── restaurant_review.txt
@@ -36,7 +38,8 @@ project4/
 │   └── generated_prompts/
 ├── tests/
 │   ├── test_post_generator.py
-│   └── test_ollama_client.py
+│   ├── test_ollama_client.py
+│   └── test_naver_automation.py
 ├── data/
 │   └── settings.json
 ├── .env.example
@@ -78,6 +81,7 @@ OPENAI_API_KEY=sk-실제_API_Key
 OPENAI_MODEL=gpt-5.4-mini
 OLLAMA_MODEL=gemma3:4b
 OLLAMA_BASE_URL=http://localhost:11434
+NAVER_WRITE_URL=https://blog.naver.com/GoBlogWrite.naver
 ```
 
 ## 실행 방법과 모드 선택
@@ -142,6 +146,38 @@ ChatGPT Plus와 별도로 API 사용량에 따른 요금이 발생합니다.
 outputs/generated_posts/YYYYMMDD_HHMMSS_이름.txt
 ```
 
+## 네이버 편집기 반자동 배치
+
+Ollama 또는 OpenAI API로 글을 생성한 뒤 다음 질문에 `y`를 입력하면
+네이버 편집 자동화를 시작합니다.
+
+```text
+네이버 글쓰기 화면에 사진과 본문을 자동 배치할까요? (y/n):
+```
+
+1. 제목 후보 5개 중 하나를 선택합니다.
+2. 자동화 전용 Chrome 창이 열립니다.
+3. 첫 실행에는 브라우저에서 네이버에 직접 로그인합니다.
+4. 제목과 본문을 입력할 수 있는 글쓰기 화면이 보이면 콘솔에서 Enter를 누릅니다.
+5. 프로그램이 제목, 사진, 해당 사진 설명을 순서대로 배치합니다.
+6. 태그 10개는 클립보드에 복사되므로 발행 설정에서 직접 붙여넣습니다.
+7. 브라우저에서 사실관계와 배치를 확인한 뒤 임시저장 또는 발행합니다.
+
+프로그램은 계정 비밀번호를 받지 않으며, 로그인 쿠키는 Git에서 제외된
+`data/naver_browser_profile`에 저장됩니다. 일반 Chrome 프로필과 충돌하지
+않는 전용 프로필입니다.
+
+중요: 프로그램은 발행 버튼을 자동으로 누르지 않습니다. AI가 만든 글에는
+사실과 다른 내용이 포함될 수 있으므로 반드시 사용자가 검토해야 합니다.
+네이버 스마트에디터 화면 구조가 변경되면 selector를 업데이트해야 할 수
+있습니다.
+
+네이버의 공식 블로그 글쓰기 API는 2020년에 종료되었습니다.
+
+```text
+https://developers.naver.com/notice/article/7527
+```
+
 ## 블로그 스타일 바꾸기
 
 `data/settings.json`의 문구를 원하는 말투로 수정하세요. JSON 문법상
@@ -158,6 +194,8 @@ outputs/generated_posts/YYYYMMDD_HHMMSS_이름.txt
 - Ollama HTTP 404 또는 모델 오류: `ollama pull gemma3:4b`를 실행합니다.
 - `OpenAI API 호출에 실패했습니다`: 인터넷 연결, API Key, 사용 한도와 모델 접근 권한을 확인합니다.
 - `클립보드에 복사할 수 없습니다`: 저장된 프롬프트 TXT 파일을 직접 복사합니다.
+- `스마트에디터 입력 영역을 찾지 못했습니다`: 로그인 후 새 글쓰기 화면이 완전히 열렸는지 확인합니다.
+- `본문의 사진 위치 표시가 올바르지 않습니다`: 글을 다시 생성하거나 TXT의 `[PHOTO_N]` 표시를 확인합니다.
 - `파일 저장에 실패했습니다`: 출력 폴더 쓰기 권한과 디스크 여유 공간을 확인합니다.
 
 Ollama나 OpenAI 호출이 실패해도 오류 메시지를 출력한 뒤 프로그램이

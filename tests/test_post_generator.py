@@ -75,6 +75,7 @@ class PostGeneratorTests(unittest.TestCase):
 
         self.assertIn("테스트 식당", prompt)
         self.assertIn("첨부한 사진 1장", prompt)
+        self.assertIn("[PHOTO_1]", prompt)
         self.assertIn("=== 제목 후보 5개 ===", prompt)
         self.assertIn("=== 네이버 블로그 태그 10개 ===", prompt)
 
