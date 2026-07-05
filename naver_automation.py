@@ -44,13 +44,17 @@ PHOTO_MARKER = re.compile(r"\[PHOTO_(\d+)\]")
 
 # 스마트에디터 버전 차이를 고려한 제목 입력 영역 후보입니다.
 TITLE_SELECTORS = (
+    ".se-section-documentTitle .se-text-paragraph",
     ".se-documentTitle .se-text-paragraph",
+    ".se-section-title .se-text-paragraph",
     "[contenteditable='true'][data-placeholder*='제목']",
     "[contenteditable='true'][aria-label*='제목']",
     "textarea[placeholder*='제목']",
 )
 # 제목을 제외한 본문 문단을 찾기 위한 입력 영역 후보입니다.
 CONTENT_SELECTORS = (
+    ".se-main-container .se-section-text .se-text-paragraph",
+    ".se-section-text .se-text-paragraph",
     ".se-main-container .se-component.se-text .se-text-paragraph",
     ".se-main-container [contenteditable='true'].se-text-paragraph",
     "[contenteditable='true'][data-placeholder*='내용']",
@@ -145,11 +149,66 @@ class NaverBlogAutomator:
                 # 같은 selector가 여러 문단을 찾으면 첫 번째 보이는 요소를 사용합니다.
                 for index in range(locator.count()):
                     candidate = locator.nth(index)
-                    if candidate.is_visible():
-                        return candidate
+                    try:
+                        # 화면 이동 중 분리된 요소는 건너뛰고 다음 후보를 검사합니다.
+                        if candidate.is_visible():
+                            return candidate
+                    except PlaywrightError:
+                        continue
         raise NaverAutomationError(
             "네이버 스마트에디터 입력 영역을 찾지 못했습니다. "
             "글쓰기 화면이 완전히 열린 상태인지 확인해주세요."
+        )
+
+    def _page_has_editor(self, page: Page) -> bool:
+        """한 탭 안에 제목과 본문 영역이 모두 보이는지 부작용 없이 검사합니다."""
+
+        try:
+            # 두 입력 영역을 모두 찾을 수 있을 때만 실제 편집기 탭으로 판단합니다.
+            self._find_first_visible(page, TITLE_SELECTORS)
+            self._find_first_visible(page, CONTENT_SELECTORS)
+            return True
+        except NaverAutomationError:
+            return False
+
+    def _select_editor_page(self, context: Any) -> Page:
+        """로그인 뒤 열려 있는 모든 탭에서 실제 스마트에디터 탭을 선택합니다."""
+
+        # 로그인 과정에서 새 탭이 열릴 수 있으므로 가장 최근 탭부터 검사합니다.
+        for candidate in reversed(context.pages):
+            try:
+                # 아직 로딩 중인 DOM이 안정될 짧은 시간을 줍니다.
+                candidate.wait_for_timeout(500)
+                if self._page_has_editor(candidate):
+                    return candidate
+            except PlaywrightError:
+                # 닫혔거나 이동 중인 탭은 무시하고 다음 탭을 검사합니다.
+                continue
+
+        # 다음 오류 신고에서 원인을 좁힐 수 있도록 URL과 요소 개수만 수집합니다.
+        diagnostics: list[str] = []
+        for page_index, candidate in enumerate(context.pages):
+            try:
+                editable_count = sum(
+                    frame.locator("[contenteditable='true']").count()
+                    for frame in candidate.frames
+                )
+                paragraph_count = sum(
+                    frame.locator(".se-text-paragraph").count()
+                    for frame in candidate.frames
+                )
+                diagnostics.append(
+                    f"탭{page_index + 1} URL={candidate.url}, "
+                    f"contenteditable={editable_count}, "
+                    f"se-text-paragraph={paragraph_count}"
+                )
+            except PlaywrightError:
+                diagnostics.append(f"탭{page_index + 1}=진단 실패")
+        diagnostic_text = " | ".join(diagnostics) or "열린 탭 없음"
+        raise NaverAutomationError(
+            "네이버 스마트에디터 제목·본문 영역을 찾지 못했습니다. "
+            "새 글쓰기 화면인지 확인해주세요. "
+            f"[진단: {diagnostic_text}]"
         )
 
     def _find_last_visible_content(self, page: Page) -> Locator:
@@ -245,6 +304,8 @@ class NaverBlogAutomator:
                     "제목과 본문을 입력할 수 있는 화면이 보이면 콘솔로 돌아오세요."
                 )
                 input("준비되면 Enter를 누르세요: ")
+                # 로그인 중 새 탭이 생겼다면 실제 편집기 탭으로 자동 전환합니다.
+                page = self._select_editor_page(context)
                 # 사용자가 고른 제목을 먼저 입력합니다.
                 self._fill_title(page, title)
                 # 첫 텍스트인지 추적해 빈 본문과 후속 문단 입력 방식을 구분합니다.
