@@ -23,6 +23,7 @@ from post_generator import (
     InputError,
     ReviewInput,
     SaveError,
+    SUPPORTED_IMAGE_EXTENSIONS,
     build_chatgpt_prompt,
     format_post,
     generate_post,
@@ -34,20 +35,22 @@ from post_generator import (
 def choose_generation_mode() -> str:
     """ChatGPT 수동, Ollama 로컬, OpenAI API 중 실행 모드를 선택합니다."""
 
-    # 각 모드의 비용과 동작 차이를 선택 화면에서 바로 설명합니다.
-    print("\n글 생성 방식을 선택해주세요.")
-    print("1. ChatGPT용 프롬프트 만들기 (Plus에서 직접 붙여넣기)")
-    print("2. Ollama 로컬 모델로 글 생성 (API 요금 없음)")
-    print("3. OpenAI API로 글 생성 (API 요금 별도)")
-    # 사용자가 입력한 번호의 양끝 공백을 제거합니다.
-    choice = input("선택 (1/2/3): ").strip()
     # 화면 번호를 프로그램 내부에서 사용할 모드 이름에 연결합니다.
     choices = {"1": "chatgpt", "2": "ollama", "3": "openai"}
-    # 목록에 없는 값은 이후 입력을 받기 전에 거부합니다.
-    if choice not in choices:
-        raise InputError("1, 2, 3 중 하나를 입력해주세요.")
-    # 선택된 내부 모드 이름을 반환합니다.
-    return choices[choice]
+    # 올바른 번호를 입력할 때까지 같은 선택 화면을 반복합니다.
+    while True:
+        # 각 모드의 비용과 동작 차이를 선택 화면에서 바로 설명합니다.
+        print("\n글 생성 방식을 선택해주세요.")
+        print("1. ChatGPT용 프롬프트 만들기 (Plus에서 직접 붙여넣기)")
+        print("2. Ollama 로컬 모델로 글 생성 (API 요금 없음)")
+        print("3. OpenAI API로 글 생성 (API 요금 별도)")
+        # 사용자가 입력한 번호의 양끝 공백을 제거합니다.
+        choice = input("선택 (1/2/3): ").strip()
+        # 올바른 번호라면 선택된 내부 모드 이름을 반환합니다.
+        if choice in choices:
+            return choices[choice]
+        # 잘못된 값은 프로그램을 끝내지 않고 다시 안내합니다.
+        print("[안내] 1, 2, 3 중 하나를 입력해주세요.")
 
 
 def ask_yes_no(message: str) -> bool:
@@ -96,32 +99,54 @@ def choose_title(title_candidates: list[str]) -> str:
 def choose_review_type() -> str:
     """숫자로 받은 리뷰 종류를 내부 영문 코드로 변환합니다."""
 
-    # 사용자에게 선택 가능한 리뷰 종류를 번호로 보여줍니다.
-    print("\n리뷰 종류를 선택해주세요.")
-    print("1. 음식점 리뷰")
-    print("2. 상품 리뷰")
-    # 입력값 양끝의 불필요한 공백을 제거합니다.
-    choice = input("선택 (1/2): ").strip()
     # 화면 번호와 내부 리뷰 종류를 연결합니다.
     choices = {"1": "restaurant", "2": "product"}
-    # 1과 2 이외의 입력은 API 실행 전에 거부합니다.
-    if choice not in choices:
-        raise InputError("1 또는 2를 입력해주세요.")
-    # 선택한 번호에 해당하는 내부 코드를 반환합니다.
-    return choices[choice]
+    # 올바른 리뷰 번호를 받을 때까지 같은 질문을 반복합니다.
+    while True:
+        # 사용자에게 선택 가능한 리뷰 종류를 번호로 보여줍니다.
+        print("\n리뷰 종류를 선택해주세요.")
+        print("1. 음식점 리뷰")
+        print("2. 상품 리뷰")
+        # 입력값 양끝의 불필요한 공백을 제거합니다.
+        choice = input("선택 (1/2): ").strip()
+        # 올바른 번호라면 해당 내부 코드를 반환합니다.
+        if choice in choices:
+            return choices[choice]
+        # 잘못된 문자나 번호는 종료하지 않고 다시 입력받습니다.
+        print("[안내] 1 또는 2를 입력해주세요.")
 
 
 def read_rating() -> float:
     """별점을 입력받아 소수점 사용이 가능한 숫자로 변환합니다."""
 
-    # 문자열로 입력된 별점의 양끝 공백을 제거합니다.
-    value = input("별점 (1~5, 소수 가능): ").strip()
-    try:
-        # `4.5` 같은 입력을 실제 실수 자료형으로 바꿉니다.
-        return float(value)
-    except ValueError as exc:
-        # 숫자가 아닌 입력을 이해하기 쉬운 오류로 안내합니다.
-        raise InputError("별점은 숫자로 입력해주세요.") from exc
+    # 숫자이면서 1~5 범위인 별점이 들어올 때까지 반복합니다.
+    while True:
+        # 문자열로 입력된 별점의 양끝 공백을 제거합니다.
+        value = input("별점 (1~5, 소수 가능): ").strip()
+        try:
+            # `4.5` 같은 입력을 실제 실수 자료형으로 바꿉니다.
+            rating = float(value)
+        except ValueError:
+            # 숫자가 아닌 입력은 프로그램을 종료하지 않고 다시 묻습니다.
+            print("[안내] 별점은 숫자로 입력해주세요.")
+            continue
+        # 정상 범위라면 검증된 별점을 반환합니다.
+        if 1 <= rating <= 5:
+            return rating
+        print("[안내] 별점은 1점부터 5점 사이로 입력해주세요.")
+
+
+def read_required_text(label: str) -> str:
+    """공백이 아닌 필수 문자열을 입력할 때까지 같은 항목을 반복합니다."""
+
+    while True:
+        # 화면에 표시할 항목명을 받아 사용자 입력의 양끝 공백을 제거합니다.
+        value = input(f"{label}: ").strip()
+        # 한 글자라도 입력됐다면 정상 값으로 반환합니다.
+        if value:
+            return value
+        # 빈 값은 프로그램을 끝내지 않고 해당 항목만 다시 묻습니다.
+        print(f"[안내] {label} 항목을 입력해주세요.")
 
 
 def read_image_paths() -> list[Path]:
@@ -138,9 +163,23 @@ def read_image_paths() -> list[Path]:
         value = input(f"사진 {len(paths) + 1}: ").strip().strip('"')
         # 빈 줄을 사진 입력 완료 신호로 사용합니다.
         if not value:
+            # 사진을 한 장도 넣지 않았다면 종료하지 않고 첫 사진부터 다시 받습니다.
+            if not paths:
+                print("[안내] 사진 경로를 한 개 이상 입력해주세요.")
+                continue
             break
         # 홈 폴더 표현을 확장하고 절대 경로로 바꿔 저장합니다.
-        paths.append(Path(value).expanduser().resolve())
+        path = Path(value).expanduser().resolve()
+        # 존재하지 않거나 폴더인 경로는 목록에 넣지 않고 같은 번호를 다시 묻습니다.
+        if not path.exists() or not path.is_file():
+            print(f"[안내] 사진 파일을 찾을 수 없습니다: {path}")
+            continue
+        # OpenAI와 Ollama가 지원하지 않는 확장자도 입력 단계에서 바로 안내합니다.
+        if path.suffix.lower() not in SUPPORTED_IMAGE_EXTENSIONS:
+            allowed = ", ".join(sorted(SUPPORTED_IMAGE_EXTENSIONS))
+            print(f"[안내] 지원하지 않는 사진 형식입니다. 지원 형식: {allowed}")
+            continue
+        paths.append(path)
     # 한 번에 수집한 모든 사진 경로를 반환합니다.
     return paths
 
@@ -155,9 +194,9 @@ def collect_input() -> ReviewInput:
     # 개별 입력값들을 하나의 ReviewInput 객체로 묶어 반환합니다.
     return ReviewInput(
         review_type=review_type,
-        name=input(f"{label}: ").strip(),
-        link=input("링크: ").strip(),
-        memo=input("한줄 메모: ").strip(),
+        name=read_required_text(label),
+        link=read_required_text("링크"),
+        memo=read_required_text("한줄 메모"),
         rating=read_rating(),
         image_paths=read_image_paths(),
     )
