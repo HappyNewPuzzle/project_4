@@ -34,6 +34,19 @@ class FakeClient:
         }
 
 
+class IncompleteClient:
+    """GPU 결과를 버리지 않고 보정하는 상황을 재현하는 테스트 클라이언트입니다."""
+
+    def generate_post(self, instructions, user_prompt, image_paths):
+        """제목과 태그가 부족하고 중복된 응답을 반환합니다."""
+
+        return {
+            "title_candidates": ["모델 제목", "모델 제목"],
+            "body": "살려서 사용할 수 있는 블로그 본문입니다.",
+            "tags": ["#사진리뷰", "사진리뷰", "방문후기"],
+        }
+
+
 class PostGeneratorTests(unittest.TestCase):
     """ChatGPT 수동 모드와 공통 결과 변환을 검사합니다."""
 
@@ -87,6 +100,18 @@ class PostGeneratorTests(unittest.TestCase):
         self.assertEqual(5, len(post.title_candidates))
         self.assertEqual("테스트 블로그 본문입니다.", post.body)
         self.assertEqual(10, len(post.tags))
+
+    def test_incomplete_title_and_tag_counts_are_completed_locally(self):
+        """제목·태그 개수가 틀려도 모델 본문을 버리지 않고 로컬에서 보정합니다."""
+
+        post = generate_post(self.review, self.settings, IncompleteClient())
+
+        self.assertEqual(5, len(post.title_candidates))
+        self.assertEqual(10, len(post.tags))
+        self.assertEqual("모델 제목", post.title_candidates[0])
+        self.assertEqual("사진리뷰", post.tags[0])
+        self.assertEqual("살려서 사용할 수 있는 블로그 본문입니다.", post.body)
+        self.assertEqual(len(post.tags), len(set(post.tags)))
 
     def test_chatgpt_prompt_file_is_saved_in_selected_directory(self):
         """프롬프트 파일에 사진 체크리스트와 실제 프롬프트가 저장됩니다."""

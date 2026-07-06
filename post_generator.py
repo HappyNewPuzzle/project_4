@@ -205,6 +205,89 @@ def build_chatgpt_prompt(
     )
 
 
+def _unique_nonempty_strings(value: Any) -> list[str]:
+    """모델의 배열에서 비어 있지 않은 문자열만 순서를 유지해 가져옵니다."""
+
+    # 배열이 아니면 호출한 쪽에서 기본 후보를 사용하도록 빈 목록을 반환합니다.
+    if not isinstance(value, list):
+        return []
+
+    # 같은 제목이나 태그가 반복돼도 한 번만 남기기 위한 결과 목록입니다.
+    cleaned: list[str] = []
+    for item in value:
+        # 문자열이 아닌 객체나 숫자는 블로그 결과로 사용하지 않습니다.
+        if not isinstance(item, str):
+            continue
+        # 앞뒤 공백과 태그 앞의 해시 기호를 제거합니다.
+        text = item.strip().lstrip("#").strip()
+        if text and text not in cleaned:
+            cleaned.append(text)
+    return cleaned
+
+
+def _complete_titles(titles: Any, review: ReviewInput) -> list[str]:
+    """모델 제목이 다섯 개보다 적거나 많아도 정확히 다섯 개로 보정합니다."""
+
+    # 모델이 정상적으로 만든 고유 제목부터 최대 다섯 개까지 사용합니다.
+    completed = _unique_nonempty_strings(titles)[:5]
+    # 부족한 경우에만 사용자 입력을 근거로 한 안전한 제목 후보를 사용합니다.
+    fallback_titles = [
+        f"{review.name} 솔직 후기",
+        f"{review.name} 사진으로 남긴 리뷰",
+        f"{review.name} 직접 살펴본 후기",
+        f"{review.name} 별점 {review.rating:g}점 리뷰",
+        f"{review.name} 리뷰와 사진 기록",
+    ]
+    for fallback in fallback_titles:
+        if len(completed) == 5:
+            break
+        if fallback not in completed:
+            completed.append(fallback)
+    return completed
+
+
+def _complete_tags(tags: Any, review: ReviewInput) -> list[str]:
+    """모델 태그의 중복과 개수 오류를 정리해 정확히 열 개로 보정합니다."""
+
+    # 모델이 정상적으로 만든 고유 태그부터 최대 열 개까지 사용합니다.
+    completed = _unique_nonempty_strings(tags)[:10]
+    # 공백 없는 이름 태그와 리뷰 종류에 맞는 일반 태그를 준비합니다.
+    name_tag = re.sub(r"\s+", "", review.name)
+    if review.review_type == "restaurant":
+        fallback_tags = [
+            name_tag,
+            "음식점리뷰",
+            "방문후기",
+            "사진리뷰",
+            "솔직후기",
+            "맛집기록",
+            "일상기록",
+            "후기공유",
+            "리뷰추천",
+            "블로그리뷰",
+        ]
+    else:
+        fallback_tags = [
+            name_tag,
+            "상품리뷰",
+            "사용후기",
+            "사진리뷰",
+            "솔직후기",
+            "구매후기",
+            "제품추천",
+            "후기공유",
+            "리뷰추천",
+            "블로그리뷰",
+        ]
+    # 모델 태그가 부족한 만큼만 안전한 기본 태그로 채웁니다.
+    for fallback in fallback_tags:
+        if len(completed) == 10:
+            break
+        if fallback and fallback not in completed:
+            completed.append(fallback)
+    return completed
+
+
 def generate_post(
     review: ReviewInput,
     settings: dict[str, str],
@@ -220,25 +303,21 @@ def generate_post(
     titles = raw.get("title_candidates")
     body = raw.get("body")
     tags = raw.get("tags")
-    # 구조화 출력과 별개로 프로그램에서도 자료형과 개수를 다시 확인합니다.
-    if (
-        not isinstance(titles, list)
-        or len(titles) != 5
-        or not all(isinstance(item, str) for item in titles)
-        or not isinstance(body, str)
-        or not isinstance(tags, list)
-        or len(tags) != 10
-        or not all(isinstance(item, str) for item in tags)
-    ):
-        raise InputError("생성된 글의 형식이 올바르지 않습니다.")
+    # 본문은 대체할 수 없는 핵심 결과이므로 문자열이며 내용이 있을 때만 사용합니다.
+    if not isinstance(body, str) or not body.strip():
+        raise InputError(
+            "Ollama가 블로그 본문을 반환하지 않았습니다. "
+            "제목·태그 개수 오류는 자동 보정되지만 빈 본문은 보정할 수 없습니다."
+        )
 
-    # 모델이 붙인 # 문자와 앞뒤 공백을 제거해 태그 형식을 통일합니다.
-    cleaned_tags = [tag.strip().lstrip("#") for tag in tags]
-    # 제목과 본문의 가장자리 공백도 정리한 최종 객체를 반환합니다.
+    # 제목과 태그의 부족·초과·중복은 GPU 결과를 버리지 않고 로컬에서 보정합니다.
+    completed_titles = _complete_titles(titles, review)
+    completed_tags = _complete_tags(tags, review)
+    # 보정된 제목·본문·태그를 최종 결과 객체로 반환합니다.
     return GeneratedPost(
-        title_candidates=[title.strip() for title in titles],
+        title_candidates=completed_titles,
         body=body.strip(),
-        tags=cleaned_tags,
+        tags=completed_tags,
     )
 
 
