@@ -30,11 +30,13 @@ class OllamaClientError(Exception):
 class BlogOllamaClient:
     """로컬 Ollama의 `/api/chat`을 이용해 사진 리뷰 글을 생성합니다."""
 
-    def __init__(self, base_url: str, model: str) -> None:
+    def __init__(self, base_url: str, model: str, num_ctx: int = 32_768) -> None:
         # 주소 끝의 슬래시를 제거해 API 경로의 이중 슬래시를 방지합니다.
         self.base_url = base_url.rstrip("/")
         # .env에서 선택한 Vision 모델 이름을 저장합니다.
         self.model = model
+        # 다중 사진의 시각 토큰까지 담을 Ollama 문맥 크기를 저장합니다.
+        self.num_ctx = num_ctx
 
     @staticmethod
     def _encode_image(path: Path) -> str:
@@ -147,7 +149,7 @@ class BlogOllamaClient:
             "options": {
                 "temperature": 0,
                 # 여러 사진과 긴 한국어 글이 잘리지 않도록 컨텍스트를 넉넉히 둡니다.
-                "num_ctx": 16_384,
+                "num_ctx": self.num_ctx,
                 # 제목·본문·태그 JSON을 완성할 충분한 출력 토큰을 허용합니다.
                 "num_predict": 4_096,
             },

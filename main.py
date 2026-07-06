@@ -296,6 +296,7 @@ def run() -> int:
             client = BlogOllamaClient(
                 base_url=config.ollama_base_url,
                 model=config.ollama_model,
+                num_ctx=config.ollama_num_ctx,
             )
             selected_model = config.ollama_model
             provider_name = "Ollama"

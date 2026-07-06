@@ -51,6 +51,8 @@ class AppConfig:
     ollama_model: str
     # 로컬 Ollama REST API의 기본 주소입니다.
     ollama_base_url: str
+    # 사진과 글을 한 요청에 담을 Ollama 문맥 크기입니다.
+    ollama_num_ctx: int
     # 네이버 블로그 글쓰기 화면을 여는 주소입니다.
     naver_write_url: str
     # settings.json에서 읽은 말투와 고정 문구입니다.
@@ -120,6 +122,18 @@ def load_config(require_openai_key: bool = False) -> AppConfig:
     if not ollama_base_url:
         raise ConfigError("OLLAMA_BASE_URL 값이 비어 있습니다.")
 
+    # 다중 사진이 16K 문맥을 넘을 수 있어 기본 문맥 크기를 32K로 설정합니다.
+    ollama_num_ctx_text = os.getenv("OLLAMA_NUM_CTX", "32768").strip()
+    try:
+        # 환경 변수의 문자열을 Ollama가 요구하는 정수로 변환합니다.
+        ollama_num_ctx = int(ollama_num_ctx_text)
+    except ValueError as exc:
+        # 숫자가 아닌 값을 입력했을 때 정확한 설정 이름을 안내합니다.
+        raise ConfigError("OLLAMA_NUM_CTX는 정수로 입력해주세요.") from exc
+    if ollama_num_ctx < 8_192:
+        # 사진 여러 장을 처리하기 어려운 지나치게 작은 설정은 미리 차단합니다.
+        raise ConfigError("OLLAMA_NUM_CTX는 8192 이상으로 입력해주세요.")
+
     # 네이버가 로그인 사용자에게 제공하는 글쓰기 진입 주소를 설정합니다.
     naver_write_url = os.getenv(
         "NAVER_WRITE_URL",
@@ -134,6 +148,7 @@ def load_config(require_openai_key: bool = False) -> AppConfig:
         openai_model=openai_model,
         ollama_model=ollama_model,
         ollama_base_url=ollama_base_url,
+        ollama_num_ctx=ollama_num_ctx,
         naver_write_url=naver_write_url,
         settings=_load_settings(),
     )

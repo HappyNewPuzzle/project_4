@@ -81,6 +81,7 @@ OPENAI_API_KEY=sk-실제_API_Key
 OPENAI_MODEL=gpt-5.4-mini
 OLLAMA_MODEL=gemma3:4b
 OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_NUM_CTX=32768
 NAVER_WRITE_URL=https://blog.naver.com/GoBlogWrite.naver
 ```
 
@@ -144,6 +145,8 @@ Ollama가 실행 중인 상태에서 `python main.py`를 실행하고 2번을
 
 PC 메모리가 부족하거나 더 작은 모델을 사용하고 싶다면 `.env`의
 `OLLAMA_MODEL`을 설치된 다른 Vision 모델 이름으로 변경할 수 있습니다.
+사진이 많아 문맥 크기 오류가 발생하면 `OLLAMA_NUM_CTX`를 조절할 수
+있으며, RTX 3060 12GB와 `qwen3.5:9b` 조합의 권장값은 `32768`입니다.
 
 ## 3. OpenAI API 모드
 
@@ -202,6 +205,7 @@ https://developers.naver.com/notice/article/7527
 - `사진 파일을 찾을 수 없습니다`: 경로가 정확하고 파일이 존재하는지 확인합니다.
 - `Ollama 서버에 연결할 수 없습니다`: Ollama 프로그램이 실행 중인지 확인합니다.
 - Ollama HTTP 404 또는 모델 오류: `ollama pull gemma3:4b`를 실행합니다.
+- Ollama 문맥 크기 오류: `.env`의 `OLLAMA_NUM_CTX=32768` 설정을 확인합니다.
 - `OpenAI API 호출에 실패했습니다`: 인터넷 연결, API Key, 사용 한도와 모델 접근 권한을 확인합니다.
 - `클립보드에 복사할 수 없습니다`: 저장된 프롬프트 TXT 파일을 직접 복사합니다.
 - `스마트에디터 입력 영역을 찾지 못했습니다`: 로그인 후 새 글쓰기 화면이 완전히 열렸는지 확인합니다.

@@ -54,7 +54,7 @@ class OllamaClientTests(unittest.TestCase):
             self.assertTrue(request_body["messages"][1]["images"][0])
             self.assertEqual("object", request_body["format"]["type"])
             self.assertFalse(request_body["stream"])
-            self.assertEqual(16_384, request_body["options"]["num_ctx"])
+            self.assertEqual(32_768, request_body["options"]["num_ctx"])
 
     def test_markdown_json_code_fence_is_recovered(self):
         """모델이 JSON을 코드 블록으로 감싸도 내부 객체를 정상적으로 읽습니다."""
