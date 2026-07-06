@@ -33,6 +33,8 @@ OUTPUT_DIR = BASE_DIR / "outputs" / "generated_posts"
 PROMPT_OUTPUT_DIR = BASE_DIR / "outputs" / "generated_prompts"
 # 네이버 로그인 상태를 보관할 자동화 전용 Chrome 프로필 폴더입니다.
 NAVER_BROWSER_PROFILE_DIR = BASE_DIR / "data" / "naver_browser_profile"
+# 여러 네이버 계정의 로그인 상태를 각각 보관할 상위 폴더입니다.
+NAVER_BROWSER_PROFILES_DIR = BASE_DIR / "data" / "naver_browser_profiles"
 
 
 class ConfigError(Exception):

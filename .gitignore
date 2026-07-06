@@ -3,6 +3,7 @@
 __pycache__/
 *.py[cod]
 data/naver_browser_profile/
+data/naver_browser_profiles/
 data/last_input.json
 data/last_input.tmp
 outputs/generated_posts/*.txt

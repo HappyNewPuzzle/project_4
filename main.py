@@ -13,7 +13,7 @@ import re
 # ChatGPT용 프롬프트를 클립보드에 복사하는 기능입니다.
 from clipboard_utils import ClipboardError, copy_to_clipboard
 # 환경 변수와 블로그 스타일을 읽는 기능입니다.
-from config import ConfigError, NAVER_BROWSER_PROFILE_DIR, load_config
+from config import ConfigError, load_config
 # 오류 뒤 이전 입력을 복원하는 로컬 체크포인트 기능입니다.
 from draft_store import (
     DraftStoreError,
@@ -23,6 +23,8 @@ from draft_store import (
 )
 # 네이버 스마트에디터 반자동 배치 기능과 전용 오류입니다.
 from naver_automation import NaverAutomationError, NaverBlogAutomator
+# 비밀번호 없이 네이버 계정별 로그인 상태를 선택하는 기능입니다.
+from naver_profiles import NaverProfileError, choose_naver_profile
 # 로컬 Ollama Vision 모델 클라이언트와 통신 오류입니다.
 from ollama_client import BlogOllamaClient, OllamaClientError
 # OpenAI API 클라이언트와 통신 오류입니다.
@@ -371,6 +373,8 @@ def run() -> int:
 
         # 생성 후 원할 때만 네이버 브라우저 자동화를 시작합니다.
         if ask_yes_no("\n네이버 글쓰기 화면에 사진과 본문을 자동 배치할까요?"):
+            # 계정마다 분리된 Chrome 프로필 중 이번 글에 사용할 계정을 선택합니다.
+            naver_profile_dir = choose_naver_profile()
             # 다섯 제목 중 실제 편집기에 사용할 하나를 선택합니다.
             selected_title = choose_title(post.title_candidates)
             # 발행 설정의 태그 입력란에서 바로 붙여넣도록 태그를 복사합니다.
@@ -385,7 +389,7 @@ def run() -> int:
             # 로그인 상태를 보존하는 전용 Chrome 프로필로 편집기를 엽니다.
             automator = NaverBlogAutomator(
                 write_url=config.naver_write_url,
-                profile_dir=NAVER_BROWSER_PROFILE_DIR,
+                profile_dir=naver_profile_dir,
             )
             # 제목, 사진, 본문만 채우고 발행은 사용자가 직접 결정합니다.
             automator.fill_draft(
@@ -404,6 +408,7 @@ def run() -> int:
         ConfigError,
         InputError,
         NaverAutomationError,
+        NaverProfileError,
         OllamaClientError,
         OpenAIClientError,
         SaveError,
