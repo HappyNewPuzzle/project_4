@@ -52,8 +52,14 @@ class MainInputTests(unittest.TestCase):
     def test_invalid_generation_mode_retries(self):
         """지원하지 않는 생성 방식 뒤에 2를 입력하면 Ollama를 선택합니다."""
 
-        with patch("builtins.input", side_effect=["4", "2"]):
+        with patch("builtins.input", side_effect=["5", "2"]):
             self.assertEqual("ollama", choose_generation_mode())
+
+    def test_layout_generation_mode_is_available(self):
+        """4번을 입력하면 AI를 사용하지 않는 빈 초안 모드를 선택합니다."""
+
+        with patch("builtins.input", return_value="4"):
+            self.assertEqual("layout", choose_generation_mode())
 
     def test_invalid_rating_retries(self):
         """문자와 범위 밖 별점 뒤의 정상 소수 별점을 반환합니다."""

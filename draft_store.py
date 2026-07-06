@@ -21,7 +21,7 @@ from post_generator import InputError, ReviewInput, validate_review
 # 마지막 입력은 개인 데이터이므로 data 폴더에 로컬 파일로만 보관합니다.
 LAST_INPUT_PATH = BASE_DIR / "data" / "last_input.json"
 # 저장 파일에서 허용할 세 가지 생성 방식입니다.
-VALID_MODES = {"chatgpt", "ollama", "openai"}
+VALID_MODES = {"chatgpt", "ollama", "openai", "layout"}
 
 
 class DraftStoreError(Exception):

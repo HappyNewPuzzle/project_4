@@ -16,6 +16,7 @@ import post_generator
 from post_generator import (
     ReviewInput,
     build_chatgpt_prompt,
+    create_layout_post,
     generate_post,
     save_chatgpt_prompt,
 )
@@ -153,6 +154,30 @@ class PostGeneratorTests(unittest.TestCase):
             "첫 번째 문단입니다.\n\n두 번째 문단입니다.",
             post.body,
         )
+        self.assertEqual(10, len(post.tags))
+
+    def test_layout_post_contains_every_photo_and_editing_space(self):
+        """AI 없는 빈 초안은 모든 사진과 직접 작성할 설명 공간을 만듭니다."""
+
+        second_image = Path(self.temp_dir.name) / "food2.jpg"
+        second_image.write_bytes(b"second-image")
+        review = ReviewInput(
+            review_type=self.review.review_type,
+            name=self.review.name,
+            link=self.review.link,
+            memo=self.review.memo,
+            rating=self.review.rating,
+            image_paths=[self.image_path, second_image],
+        )
+
+        post = create_layout_post(review, self.settings)
+
+        self.assertIn("[PHOTO_1]", post.body)
+        self.assertIn("[PHOTO_2]", post.body)
+        self.assertIn("✏️ 사진 1 설명을 입력하세요.", post.body)
+        self.assertIn("✏️ 사진 2 설명을 입력하세요.", post.body)
+        self.assertIn(self.review.link, post.body)
+        self.assertEqual(5, len(post.title_candidates))
         self.assertEqual(10, len(post.tags))
 
     def test_chatgpt_prompt_file_is_saved_in_selected_directory(self):

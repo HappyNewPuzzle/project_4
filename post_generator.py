@@ -76,6 +76,70 @@ class GeneratedPost:
     tags: list[str]
 
 
+def create_layout_post(
+    review: ReviewInput,
+    settings: dict[str, str],
+) -> GeneratedPost:
+    """AI 호출 없이 사진과 직접 작성할 안내 문구가 포함된 빈 초안을 만듭니다."""
+
+    # 사진 파일까지 미리 확인해 네이버 배치 도중 뒤늦게 실패하지 않게 합니다.
+    validate_review(review)
+    # 리뷰 종류에 맞춰 사진 뒤에 사용자가 채울 글감 항목을 준비합니다.
+    if review.review_type == "restaurant":
+        section_prompts = [
+            "✏️ 방문 이유와 매장의 첫인상을 입력하세요.",
+            "✏️ 메뉴와 분위기에 대한 내용을 입력하세요.",
+            "✏️ 맛과 가격에 대한 솔직한 후기를 입력하세요.",
+            "✏️ 만족도와 재방문 의사를 입력하세요.",
+        ]
+        kind_title = "방문"
+    else:
+        section_prompts = [
+            "✏️ 구매 이유와 제품의 첫인상을 입력하세요.",
+            "✏️ 제품 특징과 사용 후기를 입력하세요.",
+            "✏️ 장점과 아쉬운 점을 입력하세요.",
+            "✏️ 추천 대상과 최종 만족도를 입력하세요.",
+        ]
+        kind_title = "사용"
+
+    # 시작 인사 다음에 사용자가 입력한 메모를 글 작성 참고란으로 남깁니다.
+    body_parts = [
+        settings["opening"],
+        f"✏️ 작성 메모: {review.memo}",
+        section_prompts[0],
+    ]
+    # 사진은 사용자가 입력한 순서를 바꾸지 않고 각각 설명 공간과 함께 배치합니다.
+    for index in range(1, len(review.image_paths) + 1):
+        body_parts.extend(
+            [
+                f"[PHOTO_{index}]",
+                f"✏️ 사진 {index} 설명을 입력하세요.",
+            ]
+        )
+    # 사진 뒤에는 종류별 후기 항목과 링크·마무리 틀을 차례대로 추가합니다.
+    body_parts.extend(
+        [
+            *section_prompts[1:],
+            settings["link_text"],
+            review.link,
+            settings["closing"],
+        ]
+    )
+    # AI가 없어도 선택 가능한 제목과 기본 태그를 사용자 정보만으로 만듭니다.
+    title_candidates = [
+        f"{review.name} {kind_title} 후기",
+        f"{review.name} 솔직 리뷰",
+        f"사진으로 남기는 {review.name} 후기",
+        f"{review.name} 직접 경험한 기록",
+        f"{review.name} 리뷰 정리",
+    ]
+    return GeneratedPost(
+        title_candidates=title_candidates,
+        body="\n\n".join(body_parts),
+        tags=_complete_tags([], review),
+    )
+
+
 def validate_review(review: ReviewInput, require_images: bool = True) -> None:
     """API 비용이 발생하기 전에 사용자 입력 전체를 검사합니다."""
 

@@ -35,6 +35,7 @@ from post_generator import (
     SUPPORTED_IMAGE_EXTENSIONS,
     build_chatgpt_prompt,
     format_post,
+    create_layout_post,
     generate_post,
     save_chatgpt_prompt,
     save_post,
@@ -42,10 +43,10 @@ from post_generator import (
 
 
 def choose_generation_mode() -> str:
-    """ChatGPT 수동, Ollama 로컬, OpenAI API 중 실행 모드를 선택합니다."""
+    """ChatGPT, Ollama, OpenAI API, AI 없는 빈 초안 중 실행 모드를 선택합니다."""
 
     # 화면 번호를 프로그램 내부에서 사용할 모드 이름에 연결합니다.
-    choices = {"1": "chatgpt", "2": "ollama", "3": "openai"}
+    choices = {"1": "chatgpt", "2": "ollama", "3": "openai", "4": "layout"}
     # 올바른 번호를 입력할 때까지 같은 선택 화면을 반복합니다.
     while True:
         # 각 모드의 비용과 동작 차이를 선택 화면에서 바로 설명합니다.
@@ -53,13 +54,14 @@ def choose_generation_mode() -> str:
         print("1. ChatGPT용 프롬프트 만들기 (Plus에서 직접 붙여넣기)")
         print("2. Ollama 로컬 모델로 글 생성 (API 요금 없음)")
         print("3. OpenAI API로 글 생성 (API 요금 별도)")
+        print("4. AI 없이 사진·글쓰기 빈 틀 만들기 (즉시 생성)")
         # 사용자가 입력한 번호의 양끝 공백을 제거합니다.
-        choice = input("선택 (1/2/3): ").strip()
+        choice = input("선택 (1/2/3/4): ").strip()
         # 올바른 번호라면 선택된 내부 모드 이름을 반환합니다.
         if choice in choices:
             return choices[choice]
         # 잘못된 값은 프로그램을 끝내지 않고 다시 안내합니다.
-        print("[안내] 1, 2, 3 중 하나를 입력해주세요.")
+        print("[안내] 1, 2, 3, 4 중 하나를 입력해주세요.")
 
 
 def ask_yes_no(message: str) -> bool:
@@ -329,7 +331,11 @@ def run() -> int:
             return 0
 
         # Ollama 모드는 API Key 없이 로컬 REST API 클라이언트를 만듭니다.
-        if mode == "ollama":
+        if mode == "layout":
+            # 빈 초안 모드는 사진을 분석하지 않고 즉시 편집용 틀을 만듭니다.
+            post = create_layout_post(review, config.settings)
+            print("\nAI 분석 없이 사진 배치용 빈 초안을 만들었습니다.")
+        elif mode == "ollama":
             client = BlogOllamaClient(
                 base_url=config.ollama_base_url,
                 model=config.ollama_model,
@@ -347,13 +353,14 @@ def run() -> int:
             selected_model = config.openai_model
             provider_name = "OpenAI API"
 
-        # 모델 실행 중임을 사용자가 알 수 있게 표시합니다.
-        print(
-            f"\n사진을 분석하고 글을 생성하는 중입니다... "
-            f"({provider_name}: {selected_model})"
-        )
-        # 입력과 사진을 이용해 구조화된 리뷰 글을 생성합니다.
-        post = generate_post(review, config.settings, client)
+        if mode != "layout":
+            # 모델 실행 중임을 사용자가 알 수 있게 표시합니다.
+            print(
+                f"\n사진을 분석하고 글을 생성하는 중입니다... "
+                f"({provider_name}: {selected_model})"
+            )
+            # 입력과 사진을 이용해 구조화된 리뷰 글을 생성합니다.
+            post = generate_post(review, config.settings, client)
         # 생성에 성공한 결과를 TXT 파일로 저장합니다.
         output_path = save_post(post, review.name)
 
