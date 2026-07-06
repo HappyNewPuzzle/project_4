@@ -14,6 +14,13 @@ import re
 from clipboard_utils import ClipboardError, copy_to_clipboard
 # 환경 변수와 블로그 스타일을 읽는 기능입니다.
 from config import ConfigError, NAVER_BROWSER_PROFILE_DIR, load_config
+# 오류 뒤 이전 입력을 복원하는 로컬 체크포인트 기능입니다.
+from draft_store import (
+    DraftStoreError,
+    clear_last_input,
+    load_last_input,
+    save_last_input,
+)
 # 네이버 스마트에디터 반자동 배치 기능과 전용 오류입니다.
 from naver_automation import NaverAutomationError, NaverBlogAutomator
 # 로컬 Ollama Vision 모델 클라이언트와 통신 오류입니다.
@@ -263,12 +270,35 @@ def run() -> int:
     print("=" * 50)
 
     try:
-        # API 사용 여부를 먼저 정해 불필요한 API Key 요구를 피합니다.
-        mode = choose_generation_mode()
+        # 이전 실행이 오류나 강제 종료로 끝났다면 저장된 입력을 먼저 확인합니다.
+        try:
+            saved_input = load_last_input()
+        except DraftStoreError as exc:
+            # 체크포인트가 깨졌어도 새 글 입력은 계속할 수 있게 안내만 표시합니다.
+            print(f"\n[안내] {exc}")
+            saved_input = None
+
+        # 저장된 입력은 사용자가 원할 때만 복원하고 아니면 새 글을 입력받습니다.
+        if saved_input is not None and ask_yes_no(
+            f"\n이전 입력을 불러올까요? "
+            f"({saved_input[1].name}, 사진 {len(saved_input[1].image_paths)}장)"
+        ):
+            mode, review = saved_input
+            print("[안내] 이전 입력을 불러왔습니다.")
+        else:
+            # API 사용 여부를 먼저 정해 불필요한 API Key 요구를 피합니다.
+            mode = choose_generation_mode()
+            # ChatGPT 수동 모드에서는 중복되는 로컬 사진 경로 입력을 생략합니다.
+            review = collect_input(include_images=(mode != "chatgpt"))
+
+        try:
+            # 설정 확인보다 먼저 저장해 API Key 오류가 나도 입력을 다시 쓸 수 있게 합니다.
+            save_last_input(mode, review)
+        except DraftStoreError as exc:
+            # 체크포인트 저장 실패가 실제 글 생성을 막지는 않도록 안내만 표시합니다.
+            print(f"[안내] {exc}")
         # OpenAI 모드에서만 API Key를 필수로 검사합니다.
         config = load_config(require_openai_key=(mode == "openai"))
-        # ChatGPT 수동 모드에서는 중복되는 로컬 사진 경로 입력을 생략합니다.
-        review = collect_input(include_images=(mode != "chatgpt"))
 
         # ChatGPT 수동 모드는 API를 호출하지 않고 붙여넣을 프롬프트만 만듭니다.
         if mode == "chatgpt":
@@ -291,6 +321,11 @@ def run() -> int:
             print(f"\n{clipboard_message}")
             print(f"저장 완료: {output_path}")
             print("사진을 ChatGPT에 먼저 첨부한 뒤 프롬프트를 붙여넣어주세요.")
+            try:
+                # 프롬프트 생성까지 정상 완료됐으므로 임시 입력을 정리합니다.
+                clear_last_input()
+            except DraftStoreError as exc:
+                print(f"[안내] {exc}")
             return 0
 
         # Ollama 모드는 API Key 없이 로컬 REST API 클라이언트를 만듭니다.
@@ -351,6 +386,11 @@ def run() -> int:
                 body=post.body,
                 image_paths=review.image_paths,
             )
+        try:
+            # 생성과 선택한 자동 배치 단계가 모두 끝난 경우에만 체크포인트를 삭제합니다.
+            clear_last_input()
+        except DraftStoreError as exc:
+            print(f"[안내] {exc}")
         # 정상 종료를 뜻하는 코드 0을 반환합니다.
         return 0
     except (
