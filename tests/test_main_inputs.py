@@ -8,6 +8,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+# 템플릿 사진 구간 테스트에 사용할 공통 리뷰 입력 객체입니다.
+from post_generator import ReviewInput
 # 검증할 예/아니요 및 제목 선택 함수를 가져옵니다.
 from main import (
     ask_yes_no,
@@ -18,6 +20,7 @@ from main import (
     read_rating,
     read_image_paths,
     read_required_text,
+    read_template_section_counts,
 )
 
 
@@ -108,6 +111,24 @@ class MainInputTests(unittest.TestCase):
 
         mocked_read_images.assert_not_called()
         self.assertEqual([], review.image_paths)
+
+    def test_restaurant_template_assigns_remaining_photos_to_food(self):
+        """가게 템플릿의 마지막 음식 구간에는 남은 사진을 자동 배정합니다."""
+
+        images = [Path(f"photo{number}.jpg") for number in range(1, 7)]
+        review = ReviewInput(
+            review_type="restaurant",
+            name="테스트 가게",
+            link="https://example.com",
+            memo="메모",
+            rating=4.0,
+            image_paths=images,
+        )
+        # 외부 1장, 내부 2장, 메뉴 1장을 입력하면 음식은 남은 2장이 됩니다.
+        with patch("builtins.input", side_effect=["1", "2", "1"]):
+            counts = read_template_section_counts(review)
+
+        self.assertEqual([1, 2, 1, 2], counts)
 
 
 # 이 파일을 직접 실행해도 테스트가 시작되게 합니다.

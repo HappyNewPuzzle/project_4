@@ -25,6 +25,11 @@ from draft_store import (
 from naver_automation import NaverAutomationError, NaverBlogAutomator
 # 비밀번호 없이 네이버 계정별 로그인 상태를 선택하는 기능입니다.
 from naver_profiles import NaverProfileError, choose_naver_profile
+# 4번 모드의 네이버 템플릿 표시와 사진 구간을 구성합니다.
+from naver_template_layout import (
+    build_naver_template_layout,
+    get_photo_sections,
+)
 # 로컬 Ollama Vision 모델 클라이언트와 통신 오류입니다.
 from ollama_client import BlogOllamaClient, OllamaClientError
 # OpenAI API 클라이언트와 통신 오류입니다.
@@ -56,7 +61,7 @@ def choose_generation_mode() -> str:
         print("1. ChatGPT용 프롬프트 만들기 (Plus에서 직접 붙여넣기)")
         print("2. Ollama 로컬 모델로 글 생성 (API 요금 없음)")
         print("3. OpenAI API로 글 생성 (API 요금 별도)")
-        print("4. AI 없이 사진·글쓰기 빈 틀 만들기 (즉시 생성)")
+        print("4. AI 없이 네이버 내 템플릿 채우기 (즉시 생성)")
         # 사용자가 입력한 번호의 양끝 공백을 제거합니다.
         choice = input("선택 (1/2/3/4): ").strip()
         # 올바른 번호라면 선택된 내부 모드 이름을 반환합니다.
@@ -265,6 +270,43 @@ def collect_input(include_images: bool = True) -> ReviewInput:
     )
 
 
+def read_template_section_counts(review: ReviewInput) -> list[int]:
+    """4번 모드에서 입력 사진을 네이버 템플릿 구간별로 나눕니다."""
+
+    # 상품 또는 가게 리뷰에 맞는 사진 구간 이름을 가져옵니다.
+    sections = get_photo_sections(review.review_type)
+    remaining = len(review.image_paths)
+    counts: list[int] = []
+    print(
+        f"\n사진 {len(review.image_paths)}장을 템플릿 구간별로 나눠주세요.\n"
+        "사진은 입력한 순서대로 앞 구간부터 배치됩니다."
+    )
+    # 마지막 구간은 남은 사진을 자동 배정하므로 앞 구간만 질문합니다.
+    for section in sections[:-1]:
+        while True:
+            raw_count = input(
+                f"{section.label} 수 (0~{remaining}, 빈칸=0): "
+            ).strip()
+            if not raw_count:
+                count = 0
+            else:
+                try:
+                    count = int(raw_count)
+                except ValueError:
+                    print("[안내] 사진 수를 숫자로 입력해주세요.")
+                    continue
+            if not 0 <= count <= remaining:
+                print(f"[안내] 0부터 {remaining} 사이로 입력해주세요.")
+                continue
+            counts.append(count)
+            remaining -= count
+            break
+    # 사용자가 합계를 계산할 필요가 없도록 남은 사진은 마지막 구간에 모두 넣습니다.
+    counts.append(remaining)
+    print(f"[안내] {sections[-1].label} {remaining}장을 자동 배정했습니다.")
+    return counts
+
+
 def run() -> int:
     """전체 실행 순서를 관리하고 운영체제 종료 코드를 반환합니다."""
 
@@ -336,7 +378,7 @@ def run() -> int:
         if mode == "layout":
             # 빈 초안 모드는 사진을 분석하지 않고 즉시 편집용 틀을 만듭니다.
             post = create_layout_post(review, config.settings)
-            print("\nAI 분석 없이 사진 배치용 빈 초안을 만들었습니다.")
+            print("\nAI 분석 없이 네이버 내 템플릿용 초안을 만들었습니다.")
         elif mode == "ollama":
             client = BlogOllamaClient(
                 base_url=config.ollama_base_url,
@@ -366,15 +408,31 @@ def run() -> int:
         # 생성에 성공한 결과를 TXT 파일로 저장합니다.
         output_path = save_post(post, review.name)
 
-        # 같은 결과를 콘솔에도 출력해 즉시 복사할 수 있게 합니다.
-        print("\n" + format_post(post))
-        # 나중에 파일을 찾을 수 있도록 전체 저장 경로를 보여줍니다.
-        print(f"저장 완료: {output_path}")
+        if mode == "layout":
+            # 4번의 실제 본문은 네이버 내 템플릿에서 만들어지므로 사용 순서만 안내합니다.
+            print(
+                "\n네이버 내 템플릿 연동 준비를 완료했습니다.\n"
+                "아래 자동 배치 질문에 y를 입력한 뒤 안내된 템플릿을 불러오세요."
+            )
+            print(f"참고용 빈 초안 저장 완료: {output_path}")
+        else:
+            # AI 생성 모드는 같은 결과를 콘솔에도 출력해 즉시 복사할 수 있게 합니다.
+            print("\n" + format_post(post))
+            # 나중에 파일을 찾을 수 있도록 전체 저장 경로를 보여줍니다.
+            print(f"저장 완료: {output_path}")
 
         # 생성 후 원할 때만 네이버 브라우저 자동화를 시작합니다.
         if ask_yes_no("\n네이버 글쓰기 화면에 사진과 본문을 자동 배치할까요?"):
             # 계정마다 분리된 Chrome 프로필 중 이번 글에 사용할 계정을 선택합니다.
             naver_profile_dir = choose_naver_profile()
+            # 4번 모드는 사진을 템플릿의 의미별 구간으로 먼저 나눕니다.
+            template_layout = None
+            if mode == "layout":
+                section_counts = read_template_section_counts(review)
+                template_layout = build_naver_template_layout(
+                    review,
+                    section_counts,
+                )
             # 다섯 제목 중 실제 편집기에 사용할 하나를 선택합니다.
             selected_title = choose_title(post.title_candidates)
             # 발행 설정의 태그 입력란에서 바로 붙여넣도록 태그를 복사합니다.
@@ -391,12 +449,19 @@ def run() -> int:
                 write_url=config.naver_write_url,
                 profile_dir=naver_profile_dir,
             )
-            # 제목, 사진, 본문만 채우고 발행은 사용자가 직접 결정합니다.
-            automator.fill_draft(
-                title=selected_title,
-                body=post.body,
-                image_paths=review.image_paths,
-            )
+            if template_layout is not None:
+                # 사용자가 불러온 공식 내 템플릿의 표시를 사진과 작성 공간으로 교체합니다.
+                automator.fill_template_draft(
+                    title=selected_title,
+                    layout=template_layout,
+                )
+            else:
+                # 일반 생성 모드는 제목, 사진, 본문을 빈 편집기에 순서대로 채웁니다.
+                automator.fill_draft(
+                    title=selected_title,
+                    body=post.body,
+                    image_paths=review.image_paths,
+                )
         try:
             # 생성과 선택한 자동 배치 단계가 모두 끝난 경우에만 체크포인트를 삭제합니다.
             clear_last_input()

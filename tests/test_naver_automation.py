@@ -7,9 +7,14 @@ import tempfile
 # 표준 테스트 도구와 파일 경로 기능을 사용합니다.
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 # 브라우저 실행 전에 검증할 블록 변환 기능과 오류를 가져옵니다.
-from naver_automation import NaverAutomationError, build_editor_blocks
+from naver_automation import (
+    NaverAutomationError,
+    NaverBlogAutomator,
+    build_editor_blocks,
+)
 
 
 class NaverAutomationTests(unittest.TestCase):
@@ -118,6 +123,57 @@ class NaverAutomationTests(unittest.TestCase):
                     "[PHOTO_1]\n첫 사진\n\n[PHOTO_3]\n세 번째 사진",
                     images,
                 )
+
+    def test_template_text_marker_is_replaced_without_selecting_document(self):
+        """템플릿 표시 교체는 문서 전체가 아닌 현재 한 줄만 선택합니다."""
+
+        automator = NaverBlogAutomator(
+            "https://example.com/write",
+            Path("profile"),
+        )
+        page = MagicMock()
+        paragraph = MagicMock()
+        with patch.object(
+            automator,
+            "_find_template_marker",
+            return_value=paragraph,
+        ):
+            automator._replace_template_marker(
+                page,
+                "[[INTRO]]",
+                "방문 이유를 입력하세요.",
+            )
+
+        paragraph.click.assert_called_once()
+        page.keyboard.press.assert_any_call("Home")
+        page.keyboard.press.assert_any_call("Shift+End")
+        page.keyboard.insert_text.assert_called_once_with("방문 이유를 입력하세요.")
+
+    def test_empty_template_photo_slot_removes_marker_without_upload(self):
+        """사진이 없는 구간은 파일 창을 열지 않고 표시만 삭제합니다."""
+
+        automator = NaverBlogAutomator(
+            "https://example.com/write",
+            Path("profile"),
+        )
+        page = MagicMock()
+        paragraph = MagicMock()
+        with (
+            patch.object(
+                automator,
+                "_find_template_marker",
+                return_value=paragraph,
+            ),
+            patch.object(automator, "_upload_images_at_cursor") as mocked_upload,
+        ):
+            automator._fill_template_photo_slot(
+                page,
+                "[[MENU_PHOTOS]]",
+                [],
+            )
+
+        mocked_upload.assert_not_called()
+        page.keyboard.press.assert_any_call("Backspace")
 
 
 # 이 파일을 직접 실행해도 테스트가 시작되게 합니다.

@@ -21,6 +21,9 @@ from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Locator, Page, sync_playwright
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
+# 4번 모드에서 공식 내 템플릿을 채울 슬롯 정보를 사용합니다.
+from naver_template_layout import NaverTemplateLayout
+
 
 class NaverAutomationError(Exception):
     """네이버 편집기 탐색이나 사진·본문 배치에 실패했을 때 발생합니다."""
@@ -261,6 +264,47 @@ class NaverBlogAutomator:
                         return candidate
         raise NaverAutomationError("본문의 마지막 입력 위치를 찾지 못했습니다.")
 
+    def _find_template_marker(self, page: Page, marker: str) -> Locator:
+        """내 템플릿 본문에서 한 줄로 입력된 고유 표시를 찾습니다."""
+
+        # 메인 문서와 iframe의 모든 본문 문단을 순서대로 검사합니다.
+        for scope in self._scopes(page):
+            for selector in CONTENT_SELECTORS:
+                locator = scope.locator(selector)
+                for index in range(locator.count()):
+                    candidate = locator.nth(index)
+                    try:
+                        # 숨겨진 편집 요소는 건너뛰고 실제 문단의 글자를 비교합니다.
+                        if candidate.is_visible() and marker in candidate.inner_text():
+                            return candidate
+                    except PlaywrightError:
+                        continue
+        raise NaverAutomationError(
+            f"네이버 내 템플릿에서 표시를 찾지 못했습니다: {marker}"
+        )
+
+    @staticmethod
+    def _select_current_line(page: Page, paragraph: Locator) -> None:
+        """현재 문단 한 줄만 선택해 템플릿의 다른 요소가 지워지지 않게 합니다."""
+
+        # 표시가 단독 문단이라는 규칙을 이용해 Home부터 End까지만 선택합니다.
+        paragraph.click()
+        page.keyboard.press("Home")
+        page.keyboard.press("Shift+End")
+
+    def _replace_template_marker(
+        self,
+        page: Page,
+        marker: str,
+        replacement: str,
+    ) -> None:
+        """템플릿의 텍스트 표시 한 줄을 직접 작성할 안내 문구로 교체합니다."""
+
+        paragraph = self._find_template_marker(page, marker)
+        self._select_current_line(page, paragraph)
+        # 선택된 표시를 입력 문자열로 교체하며 빈 값이면 표시만 삭제합니다.
+        page.keyboard.insert_text(replacement)
+
     def _fill_title(self, page: Page, title: str) -> None:
         """제목 영역의 기존 내용을 지우고 사용자가 고른 제목을 입력합니다."""
 
@@ -287,14 +331,16 @@ class NaverBlogAutomator:
         # 사람의 키 입력처럼 한글 본문을 현재 커서 위치에 넣습니다.
         page.keyboard.insert_text(text)
 
-    def _append_image(self, page: Page, image_path: Path) -> None:
-        """현재 본문 끝의 커서 위치에 로컬 사진 한 장을 업로드합니다."""
+    def _upload_images_at_cursor(
+        self,
+        page: Page,
+        image_paths: list[Path],
+    ) -> None:
+        """현재 편집기 커서 위치에 한 장 이상의 사진을 입력 순서대로 업로드합니다."""
 
-        # 사진이 마지막 문단 다음에 들어가도록 현재 글의 끝으로 커서를 옮깁니다.
-        paragraph = self._find_last_visible_content(page)
-        paragraph.click()
-        page.keyboard.press("End")
-        page.keyboard.press("Enter")
+        # 사진이 없는 템플릿 구간은 파일 선택 창을 열지 않습니다.
+        if not image_paths:
+            return
         # 네이버가 첫 업로드를 정리하는 동안 다음 클릭을 무시할 수 있어 재시도합니다.
         last_error: PlaywrightError | None = None
         attempts = 0
@@ -321,9 +367,12 @@ class NaverBlogAutomator:
                                     force=(retry > 0),
                                 )
                             # 운영체제 대화상자 없이 해당 사진 파일을 지정합니다.
-                            chooser_info.value.set_files(str(image_path))
-                            # 업로드 및 이미지 컴포넌트 생성이 끝날 충분한 시간을 둡니다.
-                            page.wait_for_timeout(5_000)
+                            chooser_info.value.set_files(
+                                [str(path) for path in image_paths]
+                            )
+                            # 여러 장이면 이미지 컴포넌트 생성 시간도 비례해 늘립니다.
+                            wait_time = min(30_000, 5_000 + len(image_paths) * 2_000)
+                            page.wait_for_timeout(wait_time)
                             return
                         except (PlaywrightTimeoutError, PlaywrightError) as exc:
                             last_error = exc
@@ -332,10 +381,41 @@ class NaverBlogAutomator:
                             page.wait_for_timeout(700)
 
         # 모든 사진 버튼 후보가 실패했을 때 파일명과 시도 횟수를 함께 안내합니다.
+        filenames = ", ".join(path.name for path in image_paths)
         raise NaverAutomationError(
-            f"사진 업로드 창을 처리하지 못했습니다 ({image_path.name}, "
+            f"사진 업로드 창을 처리하지 못했습니다 ({filenames}, "
             f"시도 {attempts}회): {last_error}"
         ) from last_error
+
+    def _append_image(self, page: Page, image_path: Path) -> None:
+        """현재 본문 끝의 커서 위치에 로컬 사진 한 장을 업로드합니다."""
+
+        # 사진이 마지막 문단 다음에 들어가도록 현재 글의 끝으로 커서를 옮깁니다.
+        paragraph = self._find_last_visible_content(page)
+        paragraph.click()
+        page.keyboard.press("End")
+        page.keyboard.press("Enter")
+        self._upload_images_at_cursor(page, [image_path])
+
+    def _fill_template_photo_slot(
+        self,
+        page: Page,
+        marker: str,
+        image_paths: list[Path],
+    ) -> None:
+        """사진 표시 바로 다음 위치에 그룹 사진을 올리고 표시 문단은 삭제합니다."""
+
+        marker_paragraph = self._find_template_marker(page, marker)
+        if image_paths:
+            # 표시 다음 줄에 커서를 만들어 스티커 아래, 다음 섹션 위에 사진을 넣습니다.
+            marker_paragraph.click()
+            page.keyboard.press("End")
+            page.keyboard.press("Enter")
+            self._upload_images_at_cursor(page, image_paths)
+            # 업로드 뒤에도 남아 있는 안내 표시만 다시 찾아 한 줄 선택 후 지웁니다.
+            marker_paragraph = self._find_template_marker(page, marker)
+        self._select_current_line(page, marker_paragraph)
+        page.keyboard.press("Backspace")
 
     def fill_draft(
         self,
@@ -394,3 +474,77 @@ class NaverBlogAutomator:
                 context.close()
         except PlaywrightError as exc:
             raise NaverAutomationError(f"Chrome 자동화 실행에 실패했습니다: {exc}") from exc
+
+    def fill_template_draft(
+        self,
+        title: str,
+        layout: NaverTemplateLayout,
+    ) -> None:
+        """사용자가 불러온 공식 내 템플릿의 표시를 텍스트와 사진으로 교체합니다."""
+
+        # Chrome을 열기 전에 사진 파일이 여전히 존재하는지 다시 확인합니다.
+        for image_paths in layout.photo_slots.values():
+            for image_path in image_paths:
+                if not image_path.exists() or not image_path.is_file():
+                    raise NaverAutomationError(
+                        f"템플릿에 넣을 사진 파일을 찾을 수 없습니다: {image_path}"
+                    )
+        self.profile_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with sync_playwright() as playwright:
+                # 선택한 네이버 계정의 전용 Chrome 로그인 상태를 재사용합니다.
+                context = playwright.chromium.launch_persistent_context(
+                    user_data_dir=str(self.profile_dir),
+                    channel="chrome",
+                    chromium_sandbox=True,
+                    headless=False,
+                    no_viewport=True,
+                )
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto(self.write_url, wait_until="domcontentloaded", timeout=60_000)
+                print(
+                    "\n브라우저에서 네이버 로그인과 글쓰기 화면을 확인해주세요.\n"
+                    f"오른쪽 '내 템플릿'에서 '{layout.template_name}'을 불러오세요.\n"
+                    "템플릿의 스티커와 [[...]] 표시가 보이면 콘솔로 돌아오세요."
+                )
+                input("템플릿을 불러온 뒤 Enter를 누르세요: ")
+                # 로그인이나 템플릿 선택 중 새 탭이 열렸어도 실제 편집기를 선택합니다.
+                page = self._select_editor_page(context)
+
+                # 사진을 올리기 전에 모든 표시가 있는지 확인해 중간 실패를 방지합니다.
+                required_markers = [
+                    *layout.text_slots.keys(),
+                    *layout.photo_slots.keys(),
+                ]
+                missing_markers: list[str] = []
+                for marker in required_markers:
+                    try:
+                        self._find_template_marker(page, marker)
+                    except NaverAutomationError:
+                        missing_markers.append(marker)
+                if missing_markers:
+                    raise NaverAutomationError(
+                        f"'{layout.template_name}' 템플릿 표시가 부족합니다: "
+                        + ", ".join(missing_markers)
+                    )
+
+                # 제목을 교체한 뒤 고정 스티커 아래의 글쓰기 안내 문구를 채웁니다.
+                self._fill_title(page, title)
+                for marker, replacement in layout.text_slots.items():
+                    self._replace_template_marker(page, marker, replacement)
+                # 사진 구간 표시에는 입력 순서를 유지한 그룹 사진을 한 번에 올립니다.
+                for marker, image_paths in layout.photo_slots.items():
+                    self._fill_template_photo_slot(page, marker, image_paths)
+
+                print(
+                    "\n네이버 내 템플릿의 스티커를 유지한 채 사진과 작성 공간을 채웠습니다.\n"
+                    "브라우저에서 안내 문구를 실제 후기 내용으로 바꾸고 발행해주세요.\n"
+                    "프로그램은 발행 버튼을 누르지 않습니다."
+                )
+                input("브라우저 작업을 마친 뒤 Enter를 누르면 프로그램이 종료됩니다: ")
+                context.close()
+        except PlaywrightError as exc:
+            raise NaverAutomationError(
+                f"네이버 내 템플릿 자동화에 실패했습니다: {exc}"
+            ) from exc
