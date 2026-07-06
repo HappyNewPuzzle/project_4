@@ -54,6 +54,7 @@ class OllamaClientTests(unittest.TestCase):
             self.assertTrue(request_body["messages"][1]["images"][0])
             self.assertEqual("object", request_body["format"]["type"])
             self.assertFalse(request_body["stream"])
+            self.assertFalse(request_body["think"])
             self.assertEqual(32_768, request_body["options"]["num_ctx"])
 
     def test_markdown_json_code_fence_is_recovered(self):

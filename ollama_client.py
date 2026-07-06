@@ -143,6 +143,8 @@ class BlogOllamaClient:
             ],
             # 한 번에 완성된 JSON 응답을 받도록 스트리밍을 끕니다.
             "stream": False,
+            # 블로그 작성에는 내부 추론이 불필요하므로 출력 공간을 본문에 집중시킵니다.
+            "think": False,
             # OpenAI 모드와 같은 제목·본문·태그 구조를 강제합니다.
             "format": BLOG_POST_SCHEMA,
             # 작은 로컬 모델의 형식 위반과 근거 없는 창작을 줄이기 위해 0으로 둡니다.

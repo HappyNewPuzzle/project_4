@@ -81,6 +81,44 @@ class NaverAutomationTests(unittest.TestCase):
             with self.assertRaises(NaverAutomationError):
                 build_editor_blocks("사진 표시가 없는 본문", images)
 
+    def test_trailing_missing_markers_are_appended_after_last_description(self):
+        """모델이 뒤쪽 사진 표시만 생략하면 남은 사진을 입력 순서대로 보완합니다."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            images = [
+                Path(temp_dir) / f"{number}.jpg"
+                for number in range(1, 5)
+            ]
+            body = (
+                "도입\n\n"
+                "[PHOTO_1]\n첫 사진 설명\n\n"
+                "[PHOTO_2]\n두 번째 사진 설명\n\n"
+                "전체적인 마무리 문장"
+            )
+
+            blocks = build_editor_blocks(body, images)
+
+            image_blocks = [block for block in blocks if block.kind == "image"]
+            self.assertEqual(images, [block.image_path for block in image_blocks])
+            # 누락 사진은 총평보다 앞에 배치해 링크·마무리 뒤로 밀리지 않게 합니다.
+            self.assertEqual("text", blocks[-1].kind)
+            self.assertIn("전체적인 마무리", blocks[-1].text)
+
+    def test_non_contiguous_markers_still_raise_error(self):
+        """중간 번호가 빠진 경우에는 잘못된 사진 연결을 막기 위해 중단합니다."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            images = [
+                Path(temp_dir) / f"{number}.jpg"
+                for number in range(1, 4)
+            ]
+
+            with self.assertRaises(NaverAutomationError):
+                build_editor_blocks(
+                    "[PHOTO_1]\n첫 사진\n\n[PHOTO_3]\n세 번째 사진",
+                    images,
+                )
+
 
 # 이 파일을 직접 실행해도 테스트가 시작되게 합니다.
 if __name__ == "__main__":

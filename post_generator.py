@@ -135,6 +135,10 @@ def build_generation_prompts(
 
     # 개인 스타일 설정을 모델이 읽기 쉬운 글머리표 문자열로 바꿉니다.
     style = "\n".join(f"- {key}: {value}" for key, value in settings.items())
+    # 사진이 많아도 뒤쪽 번호를 생략하지 않도록 모든 표시를 실제 문자열로 나열합니다.
+    photo_marker_checklist = ", ".join(
+        f"[PHOTO_{index}]" for index in range(1, len(review.image_paths) + 1)
+    )
     # 템플릿, 개인 스타일, 사실성 원칙을 하나의 고정 지침으로 합칩니다.
     instructions = (
         f"{template}\n\n"
@@ -152,6 +156,7 @@ def build_generation_prompts(
         "- 링크는 Markdown 문법을 쓰지 말고 원본 URL을 일반 텍스트로 넣으세요.\n"
         f"- 본문에는 [PHOTO_1]부터 [PHOTO_{len(review.image_paths)}]까지의 표시를 "
         "사진 입력 순서대로 각각 정확히 한 번씩, 별도의 한 줄로 넣으세요.\n"
+        f"- 반드시 모두 포함할 사진 표시 체크리스트: {photo_marker_checklist}\n"
         "- 각 [PHOTO_N] 바로 다음에는 해당 N번 사진에서 확실히 보이는 내용만 설명하세요.\n"
         "- 설정의 opening과 closing 문구를 본문에 각각 한 번 사용하세요.\n"
         "- 설정의 link_text 다음 줄에 사용자가 제공한 링크를 그대로 한 번 넣으세요.\n"

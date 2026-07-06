@@ -88,6 +88,41 @@ def build_editor_blocks(body: str, image_paths: list[Path]) -> list[EditorBlock]
             unique_marker_numbers.append(marker_number)
     # 최초 등장 번호는 입력 사진 수와 같은 1부터 N까지의 순서여야 합니다.
     expected_numbers = list(range(1, len(image_paths) + 1))
+    # 모델이 앞쪽 번호는 순서대로 썼지만 뒤쪽만 생략했다면 안전하게 보완합니다.
+    is_valid_prefix = (
+        bool(unique_marker_numbers)
+        and unique_marker_numbers == expected_numbers[: len(unique_marker_numbers)]
+        and len(unique_marker_numbers) < len(expected_numbers)
+    )
+    if is_valid_prefix:
+        # 마지막 사진 설명 문단 뒤에 누락 사진을 입력 순서대로 연속 배치합니다.
+        last_number = unique_marker_numbers[-1]
+        last_marker = next(
+            match
+            for match in reversed(matches)
+            if int(match.group(1)) == last_number
+        )
+        # 마지막 표시 다음의 설명 문단 끝을 찾아 총평이나 링크 앞을 우선합니다.
+        tail = normalized[last_marker.end() :]
+        paragraph_end = re.search(r"\n\s*\n", tail)
+        insertion_at = (
+            last_marker.end() + paragraph_end.end()
+            if paragraph_end
+            else len(normalized)
+        )
+        missing_markers = "\n".join(
+            f"[PHOTO_{number}]" for number in expected_numbers[len(unique_marker_numbers) :]
+        )
+        normalized = (
+            normalized[:insertion_at].rstrip()
+            + "\n\n"
+            + missing_markers
+            + "\n\n"
+            + normalized[insertion_at:].lstrip()
+        )
+        # 보완된 본문을 아래 블록 변환 과정에서 다시 읽습니다.
+        matches = list(PHOTO_MARKER.finditer(normalized))
+        unique_marker_numbers = expected_numbers
     if unique_marker_numbers != expected_numbers:
         raise NaverAutomationError(
             "본문의 사진 위치 표시가 올바르지 않습니다. "
