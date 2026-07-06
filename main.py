@@ -234,13 +234,15 @@ def _natural_path_sort_key(path: Path) -> list[tuple[int, int | str]]:
     ]
 
 
-def collect_input() -> ReviewInput:
+def collect_input(include_images: bool = True) -> ReviewInput:
     """리뷰 작성에 필요한 정보를 순서대로 모두 입력받습니다."""
 
     # 먼저 음식점과 상품 중 사용할 템플릿을 결정합니다.
     review_type = choose_review_type()
     # 선택한 종류에 맞게 이름 입력 문구를 바꿉니다.
     label = "음식점명" if review_type == "restaurant" else "상품명"
+    # ChatGPT 수동 모드는 대화창에서 직접 사진을 첨부하므로 경로 입력을 생략합니다.
+    image_paths = read_image_paths() if include_images else []
     # 개별 입력값들을 하나의 ReviewInput 객체로 묶어 반환합니다.
     return ReviewInput(
         review_type=review_type,
@@ -248,7 +250,7 @@ def collect_input() -> ReviewInput:
         link=read_required_text("링크"),
         memo=read_required_text("한줄 메모"),
         rating=read_rating(),
-        image_paths=read_image_paths(),
+        image_paths=image_paths,
     )
 
 
@@ -265,8 +267,8 @@ def run() -> int:
         mode = choose_generation_mode()
         # OpenAI 모드에서만 API Key를 필수로 검사합니다.
         config = load_config(require_openai_key=(mode == "openai"))
-        # 리뷰 정보와 사진 경로를 콘솔에서 수집합니다.
-        review = collect_input()
+        # ChatGPT 수동 모드에서는 중복되는 로컬 사진 경로 입력을 생략합니다.
+        review = collect_input(include_images=(mode != "chatgpt"))
 
         # ChatGPT 수동 모드는 API를 호출하지 않고 붙여넣을 프롬프트만 만듭니다.
         if mode == "chatgpt":

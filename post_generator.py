@@ -76,7 +76,7 @@ class GeneratedPost:
     tags: list[str]
 
 
-def validate_review(review: ReviewInput) -> None:
+def validate_review(review: ReviewInput, require_images: bool = True) -> None:
     """API 비용이 발생하기 전에 사용자 입력 전체를 검사합니다."""
 
     # 지원하는 두 종류 외의 리뷰 코드는 처리하지 않습니다.
@@ -95,7 +95,7 @@ def validate_review(review: ReviewInput) -> None:
     if not 1 <= review.rating <= 5:
         raise InputError("별점은 1점부터 5점 사이로 입력해주세요.")
     # Vision 분석을 위해 사진을 최소 한 장 요구합니다.
-    if not review.image_paths:
+    if require_images and not review.image_paths:
         raise InputError("사진 경로를 한 개 이상 입력해주세요.")
 
     # 여러 사진을 하나씩 순회하며 실제 파일과 확장자를 검사합니다.
@@ -124,21 +124,38 @@ def _load_template(review_type: str) -> str:
 
 
 def build_generation_prompts(
-    review: ReviewInput, settings: dict[str, str]
+    review: ReviewInput,
+    settings: dict[str, str],
+    require_images: bool = True,
 ) -> tuple[str, str]:
     """모든 AI 제공자가 공유할 고정 지침과 사용자 프롬프트를 만듭니다."""
 
     # 잘못된 입력으로 모델 호출이나 수동 작업이 시작되지 않도록 먼저 검사합니다.
-    validate_review(review)
+    validate_review(review, require_images=require_images)
     # 음식점 또는 상품에 맞는 글 구조를 파일에서 읽습니다.
     template = _load_template(review.review_type)
 
     # 개인 스타일 설정을 모델이 읽기 쉬운 글머리표 문자열로 바꿉니다.
     style = "\n".join(f"- {key}: {value}" for key, value in settings.items())
-    # 사진이 많아도 뒤쪽 번호를 생략하지 않도록 모든 표시를 실제 문자열로 나열합니다.
-    photo_marker_checklist = ", ".join(
-        f"[PHOTO_{index}]" for index in range(1, len(review.image_paths) + 1)
-    )
+    if review.image_paths:
+        # API 모드는 입력 사진 수를 아니까 모든 위치 표시를 실제 문자열로 나열합니다.
+        photo_marker_checklist = ", ".join(
+            f"[PHOTO_{index}]" for index in range(1, len(review.image_paths) + 1)
+        )
+        photo_rules = (
+            f"- 본문에는 [PHOTO_1]부터 [PHOTO_{len(review.image_paths)}]까지의 표시를 "
+            "사진 입력 순서대로 각각 정확히 한 번씩, 별도의 한 줄로 넣으세요.\n"
+            f"- 반드시 모두 포함할 사진 표시 체크리스트: {photo_marker_checklist}\n"
+        )
+        photo_count = f"- 사진 수: {len(review.image_paths)}장"
+    else:
+        # ChatGPT 수동 모드는 사용자가 대화창에 직접 첨부한 사진 수를 모델이 세게 합니다.
+        photo_rules = (
+            "- 이 프롬프트와 함께 ChatGPT 대화창에 첨부된 모든 사진을 분석하세요.\n"
+            "- 본문에는 [PHOTO_1]부터 시작해 첨부된 사진 수만큼의 표시를 "
+            "첨부 순서대로 각각 정확히 한 번씩, 별도의 한 줄로 넣으세요.\n"
+        )
+        photo_count = "- 사진: 이 프롬프트와 함께 ChatGPT에 직접 첨부한 사진 전체"
     # 템플릿, 개인 스타일, 사실성 원칙을 하나의 고정 지침으로 합칩니다.
     instructions = (
         f"{template}\n\n"
@@ -154,9 +171,7 @@ def build_generation_prompts(
         "서비스 경험은 사진만 보고 만들지 마세요.\n"
         "- 사진으로는 보이는 외형과 분위기만 설명하고 실제 맛이나 가격을 단정하지 마세요.\n"
         "- 링크는 Markdown 문법을 쓰지 말고 원본 URL을 일반 텍스트로 넣으세요.\n"
-        f"- 본문에는 [PHOTO_1]부터 [PHOTO_{len(review.image_paths)}]까지의 표시를 "
-        "사진 입력 순서대로 각각 정확히 한 번씩, 별도의 한 줄로 넣으세요.\n"
-        f"- 반드시 모두 포함할 사진 표시 체크리스트: {photo_marker_checklist}\n"
+        f"{photo_rules}"
         "- 각 [PHOTO_N] 바로 다음에는 해당 N번 사진에서 확실히 보이는 내용만 설명하세요.\n"
         "- 설정의 opening과 closing 문구를 본문에 각각 한 번 사용하세요.\n"
         "- 설정의 link_text 다음 줄에 사용자가 제공한 링크를 그대로 한 번 넣으세요.\n"
@@ -172,7 +187,7 @@ def build_generation_prompts(
         f"- 링크: {review.link}\n"
         f"- 한줄 메모: {review.memo}\n"
         f"- 별점: {review.rating:g}/5\n"
-        f"- 사진 수: {len(review.image_paths)}장\n\n"
+        f"{photo_count}\n\n"
         "위 정보와 첨부 사진을 바탕으로 한국어 네이버 블로그 리뷰 초안을 작성해주세요."
     )
     # 제공자별 클라이언트가 같은 프롬프트를 사용하도록 두 문자열을 함께 반환합니다.
@@ -185,11 +200,21 @@ def build_chatgpt_prompt(
     """사진과 함께 ChatGPT에 직접 붙여넣을 완성 프롬프트를 만듭니다."""
 
     # API와 동일한 리뷰 구조 및 개인 스타일 지침을 재사용합니다.
-    instructions, user_prompt = build_generation_prompts(review, settings)
+    instructions, user_prompt = build_generation_prompts(
+        review,
+        settings,
+        require_images=False,
+    )
+    # 경로를 받지 않는 수동 모드에서는 ChatGPT가 실제 첨부 사진 전체를 확인합니다.
+    photo_request = (
+        f"이 메시지와 함께 첨부한 사진 {len(review.image_paths)}장도 분석해주세요."
+        if review.image_paths
+        else "이 메시지와 함께 ChatGPT에 첨부한 모든 사진도 분석해주세요."
+    )
     # 수동 모드에서는 JSON 대신 사람이 바로 복사할 수 있는 일반 텍스트를 요청합니다.
     return (
         "아래 작성 규칙과 리뷰 정보를 모두 반영해 결과만 작성해주세요.\n"
-        f"이 메시지와 함께 첨부한 사진 {len(review.image_paths)}장도 분석해주세요.\n\n"
+        f"{photo_request}\n\n"
         "=== 작성 규칙 ===\n"
         f"{instructions}\n\n"
         "=== 사용자 리뷰 정보 ===\n"
@@ -400,16 +425,27 @@ def save_chatgpt_prompt(prompt: str, review: ReviewInput) -> Path:
     """ChatGPT용 프롬프트와 첨부할 사진 목록을 TXT 파일로 저장합니다."""
 
     # 사용자가 ChatGPT에 올릴 사진을 헷갈리지 않도록 번호와 경로를 기록합니다.
-    image_list = "\n".join(
-        f"{index}. {path}" for index, path in enumerate(review.image_paths, 1)
-    )
-    # 저장 파일에는 사용 순서, 사진 체크리스트, 실제 프롬프트를 함께 넣습니다.
+    if review.image_paths:
+        # 이전에 경로가 포함된 리뷰 객체를 넘겨도 사진 체크리스트를 계속 지원합니다.
+        image_list = "\n".join(
+            f"{index}. {path}" for index, path in enumerate(review.image_paths, 1)
+        )
+        photo_guide = (
+            "1. 아래 사진을 ChatGPT 대화창에 모두 첨부하세요.\n"
+            "2. 클립보드에 복사된 프롬프트를 붙여넣고 전송하세요.\n\n"
+            "=== 첨부할 사진 ===\n"
+            f"{image_list}\n\n"
+        )
+    else:
+        # 현재 수동 모드는 경로 대신 사용자가 고른 사진을 ChatGPT에 직접 첨부합니다.
+        photo_guide = (
+            "1. 리뷰에 사용할 사진을 ChatGPT 대화창에 원하는 순서대로 첨부하세요.\n"
+            "2. 클립보드에 복사된 프롬프트를 붙여넣고 전송하세요.\n\n"
+        )
+    # 저장 파일에는 간단한 사용 순서와 실제 프롬프트를 함께 넣습니다.
     file_content = (
         "=== 사용 방법 ===\n"
-        "1. 아래 사진을 ChatGPT 대화창에 모두 첨부하세요.\n"
-        "2. 클립보드에 복사된 프롬프트를 붙여넣고 전송하세요.\n\n"
-        "=== 첨부할 사진 ===\n"
-        f"{image_list}\n\n"
+        f"{photo_guide}"
         "=== ChatGPT에 붙여넣을 프롬프트 ===\n"
         f"{prompt}\n"
     )

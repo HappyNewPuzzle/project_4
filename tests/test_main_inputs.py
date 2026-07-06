@@ -14,6 +14,7 @@ from main import (
     choose_generation_mode,
     choose_review_type,
     choose_title,
+    collect_input,
     read_rating,
     read_image_paths,
     read_required_text,
@@ -84,6 +85,23 @@ class MainInputTests(unittest.TestCase):
                 ["photo1.webp", "photo2.png", "photo10.jpg"],
                 [path.name for path in paths],
             )
+
+    def test_chatgpt_input_skips_local_photo_paths(self):
+        """수동 ChatGPT 모드는 로컬 사진 경로를 다시 묻지 않습니다."""
+
+        with (
+            patch("main.choose_review_type", return_value="product"),
+            patch(
+                "main.read_required_text",
+                side_effect=["테스트 상품", "https://example.com", "한줄 메모"],
+            ),
+            patch("main.read_rating", return_value=4.0),
+            patch("main.read_image_paths") as mocked_read_images,
+        ):
+            review = collect_input(include_images=False)
+
+        mocked_read_images.assert_not_called()
+        self.assertEqual([], review.image_paths)
 
 
 # 이 파일을 직접 실행해도 테스트가 시작되게 합니다.

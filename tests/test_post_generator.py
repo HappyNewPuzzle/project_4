@@ -105,6 +105,23 @@ class PostGeneratorTests(unittest.TestCase):
         self.assertIn("=== 제목 후보 5개 ===", prompt)
         self.assertIn("=== 네이버 블로그 태그 10개 ===", prompt)
 
+    def test_chatgpt_prompt_without_paths_uses_attached_photos(self):
+        """수동 모드는 사진 경로 없이 ChatGPT 첨부 사진 전체를 분석하게 합니다."""
+
+        review_without_paths = ReviewInput(
+            review_type=self.review.review_type,
+            name=self.review.name,
+            link=self.review.link,
+            memo=self.review.memo,
+            rating=self.review.rating,
+            image_paths=[],
+        )
+
+        prompt = build_chatgpt_prompt(review_without_paths, self.settings)
+
+        self.assertIn("ChatGPT에 첨부한 모든 사진", prompt)
+        self.assertNotIn("사진 수: 0장", prompt)
+
     def test_common_generator_accepts_provider_independent_client(self):
         """공통 생성기는 OpenAI가 아닌 같은 규격의 클라이언트도 사용합니다."""
 
