@@ -137,7 +137,14 @@ class BlogOllamaClient:
                 {"role": "system", "content": instructions},
                 {
                     "role": "user",
-                    "content": user_prompt,
+                    "content": (
+                        f"{user_prompt}\n\n"
+                        "[JSON 출력 필드]\n"
+                        "- title_candidates: 제목 문자열 정확히 5개의 배열\n"
+                        "- body: 배열이 아닌 하나의 긴 문자열\n"
+                        "- tags: 태그 문자열 정확히 10개의 배열\n"
+                        "필드 이름과 자료형을 위와 정확히 동일하게 작성하세요."
+                    ),
                     "images": images,
                 },
             ],
@@ -167,6 +174,7 @@ class BlogOllamaClient:
                     f"{user_prompt}\n\n"
                     "이전 응답은 JSON 형식이 올바르지 않았습니다. "
                     "반드시 지정된 JSON Schema에 맞는 JSON 객체만 출력하세요. "
+                    "키는 title_candidates, body, tags만 사용하고 body는 문자열로 작성하세요. "
                     "코드 블록과 앞뒤 설명은 쓰지 마세요."
                 )
             # 현재 조건으로 Ollama 채팅 요청을 보냅니다.

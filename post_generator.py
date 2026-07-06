@@ -288,6 +288,25 @@ def _complete_tags(tags: Any, review: ReviewInput) -> list[str]:
     return completed
 
 
+def _normalize_body(body: Any) -> str:
+    """Qwen이 본문을 문단 배열로 반환해도 하나의 본문 문자열로 합칩니다."""
+
+    # 정상적인 문자열 본문은 앞뒤 공백만 제거해 그대로 사용합니다.
+    if isinstance(body, str):
+        return body.strip()
+    if isinstance(body, list):
+        # 문자열인 문단만 가져오고 빈 문단은 제거합니다.
+        paragraphs = [
+            paragraph.strip()
+            for paragraph in body
+            if isinstance(paragraph, str) and paragraph.strip()
+        ]
+        # 네이버 모바일 화면에서 읽기 좋도록 문단 사이를 빈 줄로 연결합니다.
+        return "\n\n".join(paragraphs)
+    # 그 밖의 객체나 숫자는 본문으로 안전하게 변환할 수 없습니다.
+    return ""
+
+
 def generate_post(
     review: ReviewInput,
     settings: dict[str, str],
@@ -300,11 +319,15 @@ def generate_post(
     # 준비된 지침과 모든 사진을 선택한 AI 클라이언트에 전달합니다.
     raw = client.generate_post(instructions, user_prompt, review.image_paths)
     # 응답에서 제목, 본문, 태그를 각각 꺼냅니다.
+    # Qwen이 가끔 `title_candidates` 대신 `title` 또는 `titles`를 사용해도 복구합니다.
     titles = raw.get("title_candidates")
-    body = raw.get("body")
+    if titles is None:
+        titles = raw.get("title", raw.get("titles"))
+    # Qwen이 본문을 문자열 배열로 반환하는 경우 하나의 본문으로 합칩니다.
+    body = _normalize_body(raw.get("body"))
     tags = raw.get("tags")
     # 본문은 대체할 수 없는 핵심 결과이므로 문자열이며 내용이 있을 때만 사용합니다.
-    if not isinstance(body, str) or not body.strip():
+    if not body:
         raise InputError(
             "Ollama가 블로그 본문을 반환하지 않았습니다. "
             "제목·태그 개수 오류는 자동 보정되지만 빈 본문은 보정할 수 없습니다."
@@ -316,7 +339,7 @@ def generate_post(
     # 보정된 제목·본문·태그를 최종 결과 객체로 반환합니다.
     return GeneratedPost(
         title_candidates=completed_titles,
-        body=body.strip(),
+        body=body,
         tags=completed_tags,
     )
 

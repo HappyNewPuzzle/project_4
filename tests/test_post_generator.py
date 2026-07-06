@@ -47,6 +47,19 @@ class IncompleteClient:
         }
 
 
+class QwenStyleClient:
+    """Qwen3.5가 실제로 반환한 별칭 키와 문단 배열 형식을 재현합니다."""
+
+    def generate_post(self, instructions, user_prompt, image_paths):
+        """title 키와 배열 body를 가진 응답을 반환합니다."""
+
+        return {
+            "title": [f"Qwen 제목 {number}" for number in range(1, 6)],
+            "body": ["첫 번째 문단입니다.", "두 번째 문단입니다."],
+            "tags": [f"Qwen태그{number}" for number in range(1, 11)],
+        }
+
+
 class PostGeneratorTests(unittest.TestCase):
     """ChatGPT 수동 모드와 공통 결과 변환을 검사합니다."""
 
@@ -112,6 +125,18 @@ class PostGeneratorTests(unittest.TestCase):
         self.assertEqual("사진리뷰", post.tags[0])
         self.assertEqual("살려서 사용할 수 있는 블로그 본문입니다.", post.body)
         self.assertEqual(len(post.tags), len(set(post.tags)))
+
+    def test_qwen_alias_title_and_body_array_are_normalized(self):
+        """Qwen의 title 별칭과 문단 배열을 정상 블로그 결과로 변환합니다."""
+
+        post = generate_post(self.review, self.settings, QwenStyleClient())
+
+        self.assertEqual("Qwen 제목 1", post.title_candidates[0])
+        self.assertEqual(
+            "첫 번째 문단입니다.\n\n두 번째 문단입니다.",
+            post.body,
+        )
+        self.assertEqual(10, len(post.tags))
 
     def test_chatgpt_prompt_file_is_saved_in_selected_directory(self):
         """프롬프트 파일에 사진 체크리스트와 실제 프롬프트가 저장됩니다."""
